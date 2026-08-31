@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: family-reg-ai
+    env: python
+    region: singapore # 또는 oregon, frankfurt, tokyo 등
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_server.py
+    envVars:
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: OPENAI_BASE_URL
+        value: https://open.hasa.re.kr/v1
+      - key: OPENAI_API_KEY
+        value: sk-dev-Un5B6gafFJxVcRwGnw5AlT23wDGn1ooA
