@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>사법행정 지식 관리자 콘솔 - 대한민국 법원 가족관계등록 AI</title>
+  
+  <!-- Pretendard & JetBrains Mono Fonts -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Marked Markdown Parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css?v=2.3">
+  <style>
+    /* Standalone Admin Page Layout */
+    .admin-page-container {
+      min-height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+      background: radial-gradient(circle at 50% 0%, #152238 0%, #090e17 75%);
+      overflow-y: auto;
+      overflow-x: hidden;
+      color: #e2e8f0;
+    }
+    
+    [data-theme="light"] .admin-page-container {
+      background: radial-gradient(circle at 50% 0%, #e0e7ff 0%, #f1f5f9 85%);
+      color: #1e293b;
+    }
+
+    /* Auth Login View */
+    .admin-auth-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+
+    .admin-auth-card {
+      width: 100%;
+      max-width: 480px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 16px;
+      padding: 36px 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(56, 189, 248, 0.15);
+      text-align: center;
+      backdrop-filter: blur(12px);
+      animation: popInModal 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    [data-theme="light"] .admin-auth-card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.08);
+    }
+
+    .auth-emblem {
+      width: 68px;
+      height: 68px;
+      margin: 0 auto 18px;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(13, 148, 136, 0.2));
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      color: #38bdf8;
+    }
+
+    [data-theme="light"] .auth-emblem {
+      background: #e0f2fe;
+      border-color: #7dd3fc;
+      color: #0284c7;
+    }
+
+    .auth-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 8px;
+    }
+
+    [data-theme="light"] .auth-title {
+      color: #0f172a;
+    }
+
+    .auth-subtitle {
+      font-size: 13px;
+      color: #cbd5e1;
+      line-height: 1.55;
+      margin-bottom: 24px;
+    }
+
+    [data-theme="light"] .auth-subtitle {
+      color: #475569;
+    }
+
+    .auth-input-group {
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .auth-input-label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+
+    [data-theme="light"] .auth-input-label {
+      color: #1e293b;
+    }
+
+    .auth-input-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .auth-input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: var(--radius-sm);
+      padding: 12px 42px 12px 14px;
+      color: #ffffff;
+      font-size: 14px;
+      font-family: var(--font-mono);
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .auth-input {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      color: #0f172a;
+    }
+
+    .auth-input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+    }
+
+    [data-theme="light"] .auth-input:focus {
+      border-color: #0284c7;
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+    }
+
+    .btn-toggle-eye {
+      position: absolute;
+      right: 12px;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    [data-theme="light"] .btn-toggle-eye {
+      color: #64748b;
+    }
+
+    .btn-auth-submit {
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, #2563eb 0%, #0d9488 100%);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+      transition: all 0.2s;
+    }
+
+    .btn-auth-submit:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(37, 99, 235, 0.55);
+    }
+
+    .auth-alert-box {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .auth-alert-box.error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    [data-theme="light"] .auth-alert-box.error {
+      background: #fef2f2;
+      border-color: #fca5a5;
+      color: #dc2626;
+    }
+
+    /* Admin Content Dashboard Layout */
+    .admin-dashboard-wrapper {
+      flex: 1;
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px 24px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Header action buttons */
+    .btn-goto-portal {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(13, 148, 136, 0.2);
+      border: 1px solid rgba(13, 148, 136, 0.45);
+      color: #2dd4bf;
+      padding: 6px 13px;
+      border-radius: var(--radius-md);
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .btn-goto-portal:hover {
+      background: rgba(13, 148, 136, 0.35);
+      color: #5eead4;
+    }
+
+    [data-theme="light"] .btn-goto-portal {
+      background: #f0fdfa;
+      border-color: #5eead4;
+      color: #0f766e;
+    }
+
+    [data-theme="light"] .btn-goto-portal:hover {
+      background: #ccfbf1;
+      color: #115e59;
+    }
+
+    .btn-logout {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(239, 68, 68, 0.18);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      padding: 6px 13px;
+      border-radius: var(--radius-md);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-logout:hover {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    [data-theme="light"] .btn-logout {
+      background: #fef2f2;
+      border-color: #fca5a5;
+      color: #dc2626;
+    }
+
+    [data-theme="light"] .btn-logout:hover {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .session-badge {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    [data-theme="light"] .session-badge {
+      background: #ecfdf5;
+      border-color: #6ee7b7;
+      color: #047857;
+    }
+
+    /* Top Stats Bar */
+    .admin-stats-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: rgba(18, 28, 48, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: var(--radius-md);
+      gap: 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-theme="light"] .admin-stats-bar {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .stat-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+    }
+
+    [data-theme="light"] .stat-pill {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+    }
+
+    .stat-label {
+      color: #cbd5e1;
+      font-weight: 500;
+    }
+
+    [data-theme="light"] .stat-label {
+      color: #334155;
+      font-weight: 600;
+    }
+
+    .stat-value {
+      color: #38bdf8;
+      font-weight: 700;
+    }
+
+    [data-theme="light"] .stat-value {
+      color: #0284c7;
+      font-weight: 800;
+    }
+
+    .admin-top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-stat-action {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #f1f5f9;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .btn-stat-action {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #1e293b;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .btn-stat-action:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    [data-theme="light"] .btn-stat-action:hover {
+      background: #f1f5f9;
+      border-color: #0284c7;
+      color: #0284c7;
+    }
+
+    .btn-reset-default:hover {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.5);
+    }
+
+    [data-theme="light"] .btn-reset-default {
+      color: #047857;
+      border-color: #6ee7b7;
+      background: #ecfdf5;
+    }
+
+    [data-theme="light"] .btn-reset-default:hover {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .btn-danger-clear {
+      color: #fb7185;
+      border-color: rgba(244, 63, 94, 0.35);
+    }
+
+    .btn-danger-clear:hover {
+      background: rgba(244, 63, 94, 0.25);
+      color: #fda4af;
+      border-color: rgba(244, 63, 94, 0.6);
+    }
+
+    [data-theme="light"] .btn-danger-clear {
+      color: #b91c1c;
+      border-color: #fca5a5;
+      background: #fef2f2;
+    }
+
+    [data-theme="light"] .btn-danger-clear:hover {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    /* Modal Tabs */
+    .modal-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      padding: 6px;
+      gap: 6px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    [data-theme="light"] .modal-tabs {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .modal-tab {
+      flex: 1 1 auto;
+      min-height: 42px;
+      padding: 9px 16px;
+      background: rgba(30, 41, 59, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-sm);
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    [data-theme="light"] .modal-tab {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+    }
+
+    .modal-tab:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    [data-theme="light"] .modal-tab:hover {
+      background: #f8fafc;
+      border-color: #0284c7;
+      color: #0284c7;
+    }
+
+    .modal-tab.active {
+      background: linear-gradient(135deg, #1d4ed8 0%, #0d9488 100%);
+      border: 1px solid rgba(125, 211, 252, 0.8);
+      color: #ffffff !important;
+      font-weight: 700;
+      box-shadow: 0 4px 14px rgba(29, 78, 216, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    [data-theme="light"] .modal-tab.active {
+      background: linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%);
+      border-color: #0284c7;
+      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+    }
+
+    .modal-tab.active i {
+      color: #7dd3fc;
+      filter: drop-shadow(0 0 4px rgba(125, 211, 252, 0.6));
+    }
+
+    .tab-badge {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    [data-theme="light"] .tab-badge {
+      background: #e2e8f0;
+      color: #0369a1;
+      border: 1px solid #bae6fd;
+    }
+
+    .modal-tab.active .tab-badge {
+      background: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+
+    /* Tab Panes */
+    .tab-pane {
+      padding: 16px 2px;
+      display: none;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    /* Upload Dropzone & Guide */
+    .upload-dropzone {
+      border: 2px dashed rgba(56, 189, 248, 0.45);
+      background: rgba(18, 28, 48, 0.85);
+      border-radius: var(--radius-md);
+      padding: 40px 20px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .upload-dropzone {
+      background: #ffffff;
+      border: 2px dashed #0284c7;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .upload-dropzone h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    [data-theme="light"] .upload-dropzone h3 {
+      color: #0f172a;
+    }
+
+    .upload-dropzone p {
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+
+    [data-theme="light"] .upload-dropzone p {
+      color: #334155;
+    }
+
+    .upload-dropzone .drop-icon {
+      font-size: 40px;
+      color: #38bdf8;
+    }
+
+    [data-theme="light"] .upload-dropzone .drop-icon {
+      color: #0284c7;
+    }
+
+    .btn-browse {
+      background: linear-gradient(135deg, #0284c7, #0d9488);
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .upload-guide-box {
+      margin-top: 16px;
+      background: rgba(18, 28, 48, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      font-size: 13px;
+    }
+
+    [data-theme="light"] .upload-guide-box {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .upload-guide-box h4 {
+      color: #38bdf8;
+      font-size: 14.5px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    [data-theme="light"] .upload-guide-box h4 {
+      color: #0369a1;
+    }
+
+    .upload-guide-box ul {
+      margin-left: 20px;
+      color: #e2e8f0;
+      line-height: 1.75;
+    }
+
+    [data-theme="light"] .upload-guide-box ul {
+      color: #1e293b;
+    }
+
+    .upload-guide-box code {
+      background: rgba(56, 189, 248, 0.15);
+      color: #7dd3fc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+
+    [data-theme="light"] .upload-guide-box code {
+      background: #e0f2fe;
+      color: #0369a1;
+      border: 1px solid #bae6fd;
+    }
+
+    /* Manual Form */
+    .manual-doc-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .manual-doc-form label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    [data-theme="light"] .manual-doc-form label {
+      color: #0f172a;
+    }
+
+    .form-input, .form-textarea {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      color: #ffffff;
+      font-size: 13.5px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .form-input, [data-theme="light"] .form-textarea {
+      background: #ffffff;
+      border: 1px solid #94a3b8;
+      color: #0f172a;
+    }
+
+    .form-input:focus, .form-textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+    }
+
+    [data-theme="light"] .form-input:focus, [data-theme="light"] .form-textarea:focus {
+      border-color: #0284c7;
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+    }
+
+    /* File Group Cards */
+    .file-group-card {
+      background: rgba(18, 28, 48, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin-bottom: 12px;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .file-group-card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .file-group-card:hover {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: rgba(22, 34, 58, 0.95);
+    }
+
+    [data-theme="light"] .file-group-card:hover {
+      background: #f8fafc;
+      border-color: #94a3b8;
+    }
+
+    .file-group-header {
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .file-group-name {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    [data-theme="light"] .file-group-name {
+      color: #0f172a;
+    }
+
+    .file-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .file-size-tag {
+      color: #cbd5e1;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    [data-theme="light"] .file-size-tag {
+      color: #475569;
+      font-weight: 600;
+    }
+
+    .file-chunks-drawer {
+      background: #090e17;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 340px;
+      overflow-y: auto;
+    }
+
+    [data-theme="light"] .file-chunks-drawer {
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .drawer-chunk-item {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    [data-theme="light"] .drawer-chunk-item {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
+
+    .drawer-chunk-title {
+      color: #38bdf8;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    [data-theme="light"] .drawer-chunk-title {
+      color: #0369a1;
+    }
+
+    .drawer-chunk-page {
+      font-size: 11px;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    [data-theme="light"] .drawer-chunk-page {
+      color: #334155;
+      background: #e2e8f0;
+    }
+
+    .drawer-chunk-text {
+      color: #e2e8f0;
+      font-size: 12.5px;
+      line-height: 1.65;
+    }
+
+    [data-theme="light"] .drawer-chunk-text {
+      color: #1e293b;
+      font-size: 13px;
+    }
+
+    /* Table Styles */
+    .table-wrapper {
+      background: rgba(18, 28, 48, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+      max-height: 480px;
+    }
+
+    [data-theme="light"] .table-wrapper {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .admin-doc-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .admin-doc-table th {
+      background: #111c2e;
+      color: #f1f5f9;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-bottom: 2px solid rgba(56, 189, 248, 0.3);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    [data-theme="light"] .admin-doc-table th {
+      background: #f1f5f9;
+      color: #0f172a;
+      border-bottom: 2px solid #cbd5e1;
+    }
+
+    .admin-doc-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #e2e8f0;
+      vertical-align: middle;
+    }
+
+    [data-theme="light"] .admin-doc-table td {
+      border-bottom: 1px solid #e2e8f0;
+      color: #1e293b;
+    }
+
+    .admin-doc-table tr:hover {
+      background: rgba(56, 189, 248, 0.08);
+    }
+
+    [data-theme="light"] .admin-doc-table tr:hover {
+      background: rgba(2, 132, 199, 0.05);
+    }
+
+    /* Table dynamic row classes */
+    .log-col-time {
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    [data-theme="light"] .log-col-time {
+      color: #334155;
+      font-weight: 500;
+    }
+
+    .log-col-query {
+      font-size: 13px;
+      color: #f8fafc;
+      font-weight: 600;
+    }
+    [data-theme="light"] .log-col-query {
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    .log-col-resp {
+      font-size: 12.5px;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+    [data-theme="light"] .log-col-resp {
+      color: #1e293b;
+    }
+
+    .log-col-model {
+      font-size: 11.5px;
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+    [data-theme="light"] .log-col-model {
+      color: #0284c7;
+      font-weight: 700;
+    }
+
+    .log-col-metrics {
+      font-size: 11.5px;
+      color: #cbd5e1;
+      font-family: var(--font-mono);
+    }
+    [data-theme="light"] .log-col-metrics {
+      color: #334155;
+    }
+
+    .doc-title-text {
+      color: #ffffff;
+      font-weight: 700;
+    }
+    [data-theme="light"] .doc-title-text {
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    .doc-source-text {
+      color: #2dd4bf;
+      font-weight: 600;
+    }
+    [data-theme="light"] .doc-source-text {
+      color: #0f766e;
+      font-weight: 700;
+    }
+
+    .doc-preview-text {
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    [data-theme="light"] .doc-preview-text {
+      color: #334155;
+    }
+
+    /* Metric Cards */
+    .metric-card {
+      background: rgba(18, 28, 48, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-theme="light"] .metric-card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .metric-label {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    [data-theme="light"] .metric-label {
+      color: #334155;
+      font-weight: 600;
+    }
+
+    .metric-val {
+      font-size: 22px;
+      font-weight: 800;
+      color: #ffffff;
+      font-family: var(--font-mono);
+      margin: 2px 0;
+    }
+
+    [data-theme="light"] .metric-val {
+      color: #0f172a;
+    }
+
+    .metric-sub {
+      font-size: 11.5px;
+      color: #94a3b8;
+    }
+
+    [data-theme="light"] .metric-sub {
+      color: #475569;
+      font-weight: 500;
+    }
+
+    /* Security Box */
+    .security-intro-banner {
+      background: rgba(18, 28, 48, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    [data-theme="light"] .security-intro-banner {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .security-intro-banner h4 {
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    [data-theme="light"] .security-intro-banner h4 {
+      color: #0f172a;
+    }
+
+    .security-intro-banner p {
+      color: #cbd5e1;
+      font-size: 12.5px;
+    }
+
+    [data-theme="light"] .security-intro-banner p {
+      color: #334155;
+    }
+
+    .sec-rule-item {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+    }
+
+    [data-theme="light"] .sec-rule-item {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+    }
+
+    .sec-rule-item p {
+      color: #e2e8f0;
+      font-size: 12.5px;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    [data-theme="light"] .sec-rule-item p {
+      color: #1e293b;
+    }
+
+    .sec-rule-item code {
+      background: rgba(56, 189, 248, 0.15);
+      color: #7dd3fc;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    [data-theme="light"] .sec-rule-item code {
+      background: #e2e8f0;
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    /* Modal Backdrop & Dialog */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(10px);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      animation: fadeInBackdrop 0.2s ease-out;
+    }
+
+    .modal-dialog {
+      position: relative;
+      width: 100%;
+      max-width: 860px;
+      max-height: 88vh;
+      background: #0d1524;
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      border-radius: 16px;
+      box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 35px rgba(56, 189, 248, 0.2);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: popInModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    [data-theme="light"] .modal-dialog {
+      background: #ffffff;
+      border: 1px solid #94a3b8;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.7);
+    }
+
+    [data-theme="light"] .modal-header {
+      background: #f8fafc;
+      border-bottom-color: #e2e8f0;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    [data-theme="light"] .modal-title {
+      color: #0f172a;
+    }
+
+    .btn-close-modal {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #cbd5e1;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .btn-close-modal:hover {
+      background: rgba(239, 68, 68, 0.25);
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #fca5a5;
+    }
+
+    [data-theme="light"] .btn-close-modal {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #475569;
+    }
+
+    .modal-body {
+      padding: 22px 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .modal-footer {
+      padding: 14px 24px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.7);
+    }
+
+    [data-theme="light"] .modal-footer {
+      background: #f8fafc;
+      border-top-color: #e2e8f0;
+    }
+
+    /* Modal Content Boxes */
+    #detailLogQuery {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #f8fafc;
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
+    [data-theme="light"] #detailLogQuery {
+      background: #f8fafc !important;
+      border: 1px solid #cbd5e1 !important;
+      color: #0f172a !important;
+      font-weight: 600;
+    }
+
+    #detailLogResponse {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(167, 139, 250, 0.35);
+      border-radius: 8px;
+      padding: 16px 18px;
+      color: #f1f5f9;
+      font-size: 13.5px;
+      line-height: 1.75;
+    }
+
+    [data-theme="light"] #detailLogResponse {
+      background: #ffffff !important;
+      border: 1px solid #cbd5e1 !important;
+      color: #0f172a !important;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
+
+    [data-theme="light"] #detailLogResponse h1,
+    [data-theme="light"] #detailLogResponse h2,
+    [data-theme="light"] #detailLogResponse h3,
+    [data-theme="light"] #detailLogResponse h4 {
+      color: #0f172a !important;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
+      margin-top: 12px;
+    }
+
+    [data-theme="light"] #detailLogResponse p,
+    [data-theme="light"] #detailLogResponse li {
+      color: #1e293b !important;
+    }
+
+    [data-theme="light"] #detailLogResponse strong {
+      color: #0f172a !important;
+      font-weight: 800;
+    }
+
+    .modal-source-card {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(45, 212, 191, 0.3);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12.5px;
+    }
+
+    [data-theme="light"] .modal-source-card {
+      background: #f0fdf4 !important;
+      border: 1px solid #86efac !important;
+    }
+
+    .modal-source-title {
+      color: #2dd4bf;
+      font-weight: 700;
+    }
+
+    [data-theme="light"] .modal-source-title {
+      color: #15803d !important;
+    }
+
+    .modal-source-meta {
+      color: #94a3b8;
+      font-size: 11.5px;
+      margin-bottom: 4px;
+    }
+
+    [data-theme="light"] .modal-source-meta {
+      color: #334155 !important;
+    }
+
+    .modal-source-preview {
+      color: #cbd5e1;
+      line-height: 1.55;
+      font-size: 12.5px;
+    }
+
+    [data-theme="light"] .modal-source-preview {
+      color: #1e293b !important;
+    }
+
+    .empty-state-box {
+      text-align: center;
+      color: #94a3b8;
+      padding: 24px;
+      font-size: 13px;
+    }
+
+    [data-theme="light"] .empty-state-box {
+      color: #475569;
+      background: #f8fafc;
+      border-radius: var(--radius-sm);
+    }
+
+    /* Light mode view switcher and search inputs */
+    .doc-view-tabs {
+      display: flex;
+      gap: 6px;
+      background: rgba(30, 41, 59, 0.6);
+      padding: 4px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    [data-theme="light"] .doc-view-tabs {
+      background: #e2e8f0;
+      border: 1px solid #cbd5e1;
+    }
+
+    .doc-view-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: #cbd5e1;
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    [data-theme="light"] .doc-view-btn {
+      color: #334155;
+    }
+
+    .doc-view-btn.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    [data-theme="light"] .doc-view-btn.active {
+      background: #ffffff;
+      color: #0284c7;
+      border-color: #0284c7;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .table-search-inline {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      color: #ffffff;
+      font-size: 12.5px;
+      outline: none;
+    }
+
+    [data-theme="light"] .table-search-inline {
+      background: #ffffff;
+      border: 1px solid #94a3b8;
+      color: #0f172a;
+    }
+
+    @keyframes fadeInBackdrop {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes popInModal {
+      from { opacity: 0; transform: scale(0.95) translateY(10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="admin-page-container">
+    
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="emblem-box">
+          <i class="fa-solid fa-folder-gear"></i>
+        </div>
+        <div class="title-group">
+          <div class="badge-row">
+            <span class="agency-badge"><i class="fa-solid fa-scale-balanced"></i> 대한민국 법원</span>
+            <span class="unified-badge"><i class="fa-solid fa-shield-halved"></i> 사법행정 지식관리자</span>
+            <span class="session-badge" id="sessionBadge" style="display: none;"><i class="fa-solid fa-lock-open"></i> 보안 세션 활성</span>
+          </div>
+          <h1 class="main-title">사법행정 가족관계등록 RAG 지식 & 최적화 관리 콘솔</h1>
+        </div>
+      </div>
+      
+      <div class="header-right">
+        <!-- Theme Switcher (Dark / Light) -->
+        <button id="themeToggleBtn" class="btn-theme-toggle" type="button" title="다크 모드 / 라이트 모드 전환">
+          <i class="fa-solid fa-moon"></i>
+          <span class="theme-text">다크</span>
+        </button>
+
+        <a href="/" target="_blank" class="btn-goto-portal" title="메인 가족관계등록 실무·심사 포털 열기">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i> 실무 포털
+        </a>
+
+        <button id="btnLogout" class="btn-logout" style="display: none;" title="관리자 보안 세션 종료">
+          <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+        </button>
+      </div>
+    </header>
+
+    <!-- SECTION 1: Locked Authentication Form View -->
+    <section id="authSection" class="admin-auth-wrapper">
+      <div class="admin-auth-card">
+        <div class="auth-emblem">
+          <i class="fa-solid fa-key"></i>
+        </div>
+        <h2 class="auth-title">사법행정 지식 관리자 보안 인증</h2>
+        <p class="auth-subtitle">
+          법령·규칙·예규·선례 지식 베이스 등록 및 비용·보안 통제 권한에 접근하려면 <strong>관리자 인증코드</strong>를 입력해 주세요.
+        </p>
+
+        <form id="adminLoginForm">
+          <div class="auth-input-group">
+            <label class="auth-input-label" for="authCodeInput">관리자 보안 인증코드</label>
+            <div class="auth-input-box">
+              <input type="password" id="authCodeInput" class="auth-input" placeholder="인증코드를 입력하세요" autocomplete="off" required>
+              <button type="button" id="btnTogglePassword" class="btn-toggle-eye" title="비밀번호 표시/숨기기">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <button type="submit" id="btnSubmitLogin" class="btn-auth-submit">
+            <i class="fa-solid fa-shield-check"></i> 보안 인증 및 관리자 접속
+          </button>
+          <div id="loginAlertBox" class="auth-alert-box error"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- SECTION 2: Unlocked Admin Console Dashboard View -->
+    <section id="dashboardSection" class="admin-dashboard-wrapper" style="display: none;">
+      
+      <!-- Stats Bar -->
+      <div class="admin-stats-bar">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div class="stat-pill">
+            <i class="fa-solid fa-database" style="color: #38bdf8;"></i>
+            <span class="stat-label">등록 지식:</span>
+            <span class="stat-value" id="statTotalChunks">0건</span>
+          </div>
+          <div class="stat-pill">
+            <i class="fa-solid fa-shield-halved" style="color: #34d399;"></i>
+            <span class="stat-label">보안 검증:</span>
+            <span class="stat-value" style="color: #34d399;">정상 가동</span>
+          </div>
+          <div class="stat-pill">
+            <i class="fa-solid fa-microchip" style="color: #c4b5fd;"></i>
+            <span class="stat-label">임베딩:</span>
+            <span class="stat-value" style="color: #38bdf8;">bge-m3</span>
+          </div>
+        </div>
+
+        <div class="admin-top-actions">
+          <button id="btnRefreshAdmin" class="btn-stat-action" title="지식 및 파일 목록 새로고침">
+            <i class="fa-solid fa-arrows-rotate"></i> 새로고침
+          </button>
+          <button id="btnResetDefault" class="btn-stat-action btn-reset-default" title="기본 실무편람 및 가족관계등록법 코퍼스로 초기화">
+            <i class="fa-solid fa-rotate-left"></i> 기본 코퍼스 복원
+          </button>
+          <button id="btnClearAll" class="btn-stat-action btn-danger-clear" title="모든 커스텀 및 기본 지식 삭제">
+            <i class="fa-solid fa-trash-can"></i> 전체 비우기
+          </button>
+        </div>
+      </div>
+
+      <!-- Admin Dashboard Tabs -->
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="tab-upload">
+          <i class="fa-solid fa-file-arrow-up"></i>
+          <span>PDF / JSON / 엑셀 업로드</span>
+        </button>
+        <button class="modal-tab" data-tab="tab-manual">
+          <i class="fa-solid fa-pen-nib"></i>
+          <span>단건 직접 등록</span>
+        </button>
+        <button class="modal-tab" data-tab="tab-list">
+          <i class="fa-solid fa-table-list"></i>
+          <span>등록된 지식 코퍼스</span>
+          <span class="tab-badge" id="tabListCount">0</span>
+        </button>
+        <button class="modal-tab" data-tab="tab-metrics">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>비용 & 지연 모니터링</span>
+        </button>
+        <button class="modal-tab" data-tab="tab-security">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>개인정보 & 보안 필터링</span>
+        </button>
+        <button class="modal-tab" data-tab="tab-logs">
+          <i class="fa-solid fa-clock-rotate-left"></i>
+          <span>실무 질의 이력 감사</span>
+          <span class="tab-badge" id="tabLogsCount">0</span>
+        </button>
+      </div>
+
+      <!-- Tab 1: File Upload (PDF / JSON / EXCEL) -->
+      <div class="tab-pane active" id="tab-upload">
+        <div class="upload-dropzone" id="dropzone">
+          <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+          <h3>PDF, JSON 또는 엑셀(.xlsx) 파일을 여기에 드래그하거나 클릭하세요</h3>
+          <p>실무편람 PDF, 정형 JSON, 또는 <strong>상하위 법령 위계 관계 엑셀(.xlsx)</strong> 파일 지원</p>
+          <input type="file" id="fileInput" accept=".pdf,.json,.xlsx,.xls" style="display: none;">
+          <button type="button" class="btn-browse" onclick="document.getElementById('fileInput').click()">
+            파일 선택하기
+          </button>
+        </div>
+        <div id="uploadStatus" class="upload-status" style="display: none;"></div>
+        <div class="upload-guide-box">
+          <h4>💡 파일 등록 및 상하위 법률 연계 안내</h4>
+          <ul>
+            <li><strong>상하위 법령 엑셀(.xlsx)</strong>: <code>업무구분, 상위법률(1단계), 대법원규칙(2단계), 대법원예규(3단계), 등록선례(4단계), 위임/적용원칙</code>을 자동 파싱하여 계층형 법리 추론 체인을 구축합니다.</li>
+            <li><strong>PDF 파일</strong>: 텍스트를 페이지별로 자동 추출하여 700자 단위로 자동 청킹 후 bge-m3로 실시간 임베딩합니다.</li>
+            <li><strong>JSON 파일</strong>: <code>[{"title": "...", "content": "...", "category": "...", "source": "..."}]</code> 구조 지원</li>
+          </ul>
+          <div style="margin-top: 10px;">
+            <a href="/static/sample_hierarchy.xlsx" download="가족관계등록_법령위계체계_샘플.xlsx" class="btn-sample-excel">
+              <i class="fa-solid fa-file-excel"></i> 상하위 법령 엑셀 표준 템플릿 다운로드 (.xlsx)
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Manual Direct Input -->
+      <div class="tab-pane" id="tab-manual">
+        <form class="manual-doc-form" id="manualDocForm">
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 160px;">
+              <label for="docCategory">분류 구분</label>
+              <select class="form-input" id="docCategory">
+                <option value="법률">법률 (가족관계의 등록 등에 관한 법률 등)</option>
+                <option value="대법원규칙">대법원규칙</option>
+                <option value="가족관계등록예규">가족관계등록예규</option>
+                <option value="가족관계등록선례">가족관계등록선례</option>
+                <option value="실무편람">가족관계등록 실무편람</option>
+                <option value="신고서작성">신고서·신청서 작성 요령</option>
+              </select>
+            </div>
+            <div style="flex: 2; min-width: 260px;">
+              <label for="docTitle">제목 / 조항 / 사건명</label>
+              <input type="text" class="form-input" id="docTitle" placeholder="예: 가족관계의 등록 등에 관한 법률 제44조 (출생신고의 기재사항)" required>
+            </div>
+          </div>
+
+          <div>
+            <label for="docSource">출처 / 법적 근거 표기</label>
+            <input type="text" class="form-input" id="docSource" placeholder="예: 법률 제19424호, 예규 제540호, 선례 202305-1호 등" required>
+          </div>
+
+          <div>
+            <label for="docContent">본문 및 실무 해설 (RAG 검색 대상)</label>
+            <textarea class="form-textarea" id="docContent" rows="7" placeholder="법 조항 본문, 요건, 첨부서류, 심사 주의사항, 불수리 기준 등을 상세히 입력하세요." required></textarea>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="submit" class="btn-stat-action" id="btnSaveDoc" style="padding: 9px 20px; font-size: 13px; font-weight: 700; background: linear-gradient(135deg, #059669, #0d9488); color: #fff; border: none;">
+              <i class="fa-solid fa-floppy-disk"></i> 지식 베이스에 즉시 등록
+            </button>
+          </div>
+          <div id="manualStatus" class="upload-status" style="display: none;"></div>
+        </form>
+      </div>
+
+      <!-- Tab 3: Registered Documents List -->
+      <div class="tab-pane" id="tab-list">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="doc-view-tabs">
+              <button class="doc-view-btn active" id="viewModeFilesBtn">
+                <i class="fa-solid fa-folder-tree"></i> 파일별 묶음 보기
+              </button>
+              <button class="doc-view-btn" id="viewModeChunksBtn">
+                <i class="fa-solid fa-list-check"></i> 개별 청크 목록
+              </button>
+            </div>
+            <span class="file-size-tag" id="docsTotalBadge">총 0개 지식 청크</span>
+          </div>
+          <input type="text" id="docSearchInput" class="table-search-inline" placeholder="등록 지식 검색 (제목/본문)..." style="width: 260px;">
+        </div>
+
+        <!-- Mode A: Files Grouped View -->
+        <div id="filesViewContainer">
+          <div class="files-grouped-container" id="adminFilesContainer">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Mode B: Chunks Table View -->
+        <div id="chunksViewContainer" style="display: none;">
+          <div class="table-wrapper">
+            <table class="admin-doc-table">
+              <thead>
+                <tr>
+                  <th style="width: 110px;">분류</th>
+                  <th style="width: 240px;">제목</th>
+                  <th style="width: 160px;">출처</th>
+                  <th>본문 요약</th>
+                  <th style="width: 70px;">관리</th>
+                </tr>
+              </thead>
+              <tbody id="adminDocTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Cost & Latency Metrics Monitoring -->
+      <div class="tab-pane" id="tab-metrics">
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;"><i class="fa-solid fa-calculator"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">총 누적 질의 건수</span>
+              <strong class="metric-val" id="metricTotalCalls">0건</strong>
+              <span class="metric-sub">실시간 처리 완료 질의</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(45, 212, 191, 0.2); color: #2dd4bf;"><i class="fa-solid fa-brain"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">RAG 지식 검색율</span>
+              <strong class="metric-val" id="metricRagRatio">0.0%</strong>
+              <span class="metric-sub">가족관계 실무 지식 참조율</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;"><i class="fa-solid fa-coins"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">일일 예상 토큰 비용</span>
+              <strong class="metric-val" id="metricDailyCost">$0.00</strong>
+              <span class="metric-sub">Groq/Llama-3.3 최적화 적용</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;"><i class="fa-solid fa-stopwatch"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">평균 응답 지연 시간</span>
+              <strong class="metric-val" id="metricAvgLatency">0.00초</strong>
+              <span class="metric-sub">bge-m3 + Groq 스트리밍</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-actions-bar" style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="refreshMetricsBtn" class="btn-stat-action">
+            <i class="fa-solid fa-arrows-rotate"></i> 지표 새로고침
+          </button>
+          <button id="resetMetricsBtn" class="btn-stat-action btn-danger-clear">
+            <i class="fa-solid fa-trash-can"></i> 통계 초기화
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 5: Privacy & Security Filtering -->
+      <div class="tab-pane" id="tab-security">
+        <div class="security-intro-banner">
+          <div>
+            <h4><i class="fa-solid fa-shield-halved" style="color: #34d399; margin-right: 6px;"></i> 사법행정 개인정보보호 및 프롬프트 인젝션 가드레일</h4>
+            <p>실무관 및 민원인의 주민등록번호, 연락처, 카드번호 등 민감정보를 자동 마스킹하고 악의적인 공격을 원천 차단합니다.</p>
+          </div>
+          <span class="session-badge" id="secStatusPill">
+            <i class="fa-solid fa-circle-check"></i> 필터 가동 중
+          </span>
+        </div>
+
+        <div style="background: rgba(18, 28, 48, 0.9); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: var(--radius-md); padding: 18px; margin-bottom: 16px;">
+          <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #38bdf8;">
+            <i class="fa-solid fa-list-check"></i> 실시간 보안 필터링 규칙 목록
+          </h4>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+            <div class="sec-rule-item">
+              <strong style="color: #38bdf8;"><i class="fa-solid fa-id-card"></i> 주민등록번호 마스킹</strong>
+              <p><code>\d{6}-[1-8]\d{6}</code> 패턴 탐지 시 <code>YYMMDD-*******</code> 형태로 즉시 비식별화 처리</p>
+            </div>
+            <div class="sec-rule-item">
+              <strong style="color: #34d399;"><i class="fa-solid fa-phone"></i> 휴대전화번호 마스킹</strong>
+              <p><code>01[016789]-\d{3,4}-\d{4}</code> 탐지 시 <code>010-****-1234</code> 마스킹 처리</p>
+            </div>
+            <div class="sec-rule-item">
+              <strong style="color: #fbbf24;"><i class="fa-solid fa-credit-card"></i> 카드·계좌번호 차단</strong>
+              <p>16자리 금융 카드번호 및 계좌 패턴 탐지 시 <code>****-****-****-****</code> 마스킹</p>
+            </div>
+            <div class="sec-rule-item">
+              <strong style="color: #f87171;"><i class="fa-solid fa-triangle-exclamation"></i> 프롬프트 인젝션 차단</strong>
+              <p>시스템 지침 무력화, 내부 가이드라인 탈취 시도 탐지 시 사법행정 표준 안내 메시지로 차단</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-actions-bar" style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="refreshSecurityBtn" class="btn-stat-action">
+            <i class="fa-solid fa-arrows-rotate"></i> 보안 통계 새로고침
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 6: Query History & Audit Logs -->
+      <div class="tab-pane" id="tab-logs">
+        
+        <!-- Summary Stats for Logs -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;"><i class="fa-solid fa-clipboard-question"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">총 누적 질의 건수</span>
+              <strong class="metric-val" id="logStatTotal">0건</strong>
+              <span class="metric-sub" id="logStatTotalSub">실무관 & 민원인 질의 총계</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(16, 185, 129, 0.2); color: #34d399;"><i class="fa-solid fa-calendar-day"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">오늘 인입된 질의</span>
+              <strong class="metric-val" id="logStatToday">0건</strong>
+              <span class="metric-sub">금일 실시간 심사 질의</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd;"><i class="fa-solid fa-brain"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">RAG 법령 활용 비율</span>
+              <strong class="metric-val" id="logStatRagRatio">0.0%</strong>
+              <span class="metric-sub">지식 코퍼스 참조 응답률</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(239, 68, 68, 0.2); color: #f87171;"><i class="fa-solid fa-user-shield"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">PII 필터링 검출</span>
+              <strong class="metric-val" id="logStatPiiCount">0건</strong>
+              <span class="metric-sub">개인정보 비식별화 처리</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter & Search Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" id="logSearchInput" class="table-search-inline" placeholder="질의어 / 답변 내용 검색..." style="width: 280px;">
+            <button id="btnRefreshLogs" class="btn-stat-action" title="로그 새로고침">
+              <i class="fa-solid fa-arrows-rotate"></i> 새로고침
+            </button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button id="btnExportLogs" class="btn-stat-action" title="전체 질의 이력 JSON 내보내기">
+              <i class="fa-solid fa-download"></i> JSON 내보내기
+            </button>
+            <button id="btnClearLogs" class="btn-stat-action btn-danger-clear" title="질의 이력 전체 삭제">
+              <i class="fa-solid fa-trash-can"></i> 이력 초기화
+            </button>
+          </div>
+        </div>
+
+        <!-- Logs Table -->
+        <div class="table-wrapper">
+          <table class="admin-doc-table">
+            <thead>
+              <tr>
+                <th style="width: 140px;">일시</th>
+                <th style="width: 260px;">실무관 / 민원인 질의</th>
+                <th>AI 심사 답변 요약</th>
+                <th style="width: 120px;">모델 / RAG</th>
+                <th style="width: 90px;">지연/토큰</th>
+                <th style="width: 75px;">상세</th>
+              </tr>
+            </thead>
+            <tbody id="adminLogsTableBody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination-box" id="logPaginationContainer" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 16px;">
+          <button id="btnLogPrevPage" class="btn-stat-action" disabled><i class="fa-solid fa-chevron-left"></i> 이전</button>
+          <span id="logPageIndicator" style="font-size: 13px; font-weight: 700;">1 / 1</span>
+          <button id="btnLogNextPage" class="btn-stat-action" disabled>다음 <i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+
+      </div>
+
+    </section>
+  </div>
+
+  <!-- Detail Modal for Single Query Log -->
+  <div class="modal-backdrop" id="logDetailModal" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-file-lines" style="color: #38bdf8;"></i>
+          <span>실무 질의 및 AI 심사 답변 상세 감사 로그</span>
+        </div>
+        <button class="btn-close-modal" id="btnCloseLogDetailModal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      
+      <div class="modal-body" style="overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+        
+        <!-- Log Meta Tags Row -->
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+          <span class="file-size-tag" id="detailLogId"><i class="fa-solid fa-hashtag"></i> ID</span>
+          <span class="file-size-tag" id="detailLogTime"><i class="fa-regular fa-clock"></i> 일시</span>
+          <span class="file-size-tag" id="detailLogModel"><i class="fa-solid fa-microchip"></i> 모델</span>
+          <span class="file-size-tag" id="detailLogLatency"><i class="fa-solid fa-stopwatch"></i> 지연</span>
+          <span class="file-size-tag" id="detailLogTokens"><i class="fa-solid fa-coins"></i> 토큰</span>
+          <span class="file-size-tag" id="detailLogPii" style="display: none; background: rgba(239, 68, 68, 0.2); color: #f87171;"><i class="fa-solid fa-user-shield"></i> PII 감지</span>
+        </div>
+
+        <!-- User Query Box -->
+        <div>
+          <h4 style="font-size: 13.5px; color: #38bdf8; margin-bottom: 8px; font-weight: 700;">
+            <i class="fa-solid fa-circle-question"></i> 실무관 / 민원인 질의 원문
+          </h4>
+          <div id="detailLogQuery" style="padding: 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;"></div>
+        </div>
+
+        <!-- Referenced Sources (if any) -->
+        <div id="detailLogSourcesWrapper" style="display: none;">
+          <h4 style="font-size: 13.5px; color: #2dd4bf; margin-bottom: 8px; font-weight: 700;">
+            <i class="fa-solid fa-book-bookmark"></i> 인용된 법령 및 실무예규/선례 출처 (<span id="detailLogSourcesCount">0</span>건)
+          </h4>
+          <div id="detailLogSourcesList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+        </div>
+
+        <!-- Full AI Response Box -->
+        <div>
+          <h4 style="font-size: 13.5px; color: #a78bfa; margin-bottom: 8px; font-weight: 700;">
+            <i class="fa-solid fa-scale-balanced"></i> AI 법률 심사 답변 (4단계 표준 검토)
+          </h4>
+          <div id="detailLogResponse" style="padding: 16px; border-radius: 8px; font-size: 13px; line-height: 1.7; font-family: var(--font-main);"></div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+        <button type="button" class="btn-stat-action" id="btnCopyDetailLog">
+          <i class="fa-regular fa-copy"></i> 질의응답 복사
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/admin.js?v=2.3"></script>
+</body>
+</html>

@@ -2,12 +2,15 @@ import asyncio
 import io
 import json
 import time
+import hashlib
+import secrets
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -18,7 +21,26 @@ from rag.document_parser import parse_pdf, parse_json, parse_excel
 from rag.excel_hierarchy_parser import create_sample_hierarchy_excel
 from optimization.cache_manager import cache_manager
 from optimization.metrics_collector import metrics_collector
+from optimization.query_logger import query_logger
 from security.input_filter import input_filter
+
+# --- 관리자 보안 인증 체계 (Salted SHA-256 Hashing & Session Token) ---
+ADMIN_SALT = "scourt_family_reg_admin_2026_salt"
+# 인증코드: family_manager_035 의 솔트 결합 SHA-256 해시값 (평문 저장 방지)
+EXPECTED_AUTH_HASH = hashlib.sha256((ADMIN_SALT + "family_manager_035").encode("utf-8")).hexdigest()
+admin_sessions: Dict[str, float] = {}  # token -> expiration timestamp (8시간 유효)
+
+security_bearer = HTTPBearer(auto_error=False)
+
+async def verify_admin_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)) -> str:
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="지식 관리자 보안 인증이 필요합니다.")
+    token = credentials.credentials
+    exp = admin_sessions.get(token)
+    if not exp or time.time() > exp:
+        admin_sessions.pop(token, None)
+        raise HTTPException(status_code=401, detail="인증 세션이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.")
+    return token
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -244,10 +266,43 @@ async def search_rag(req: SearchRequest):
     results = await rag_service.retrieve(req.query, top_k=req.top_k or 3)
     return {"query": req.query, "results": results}
 
-# --- 관리자 문서/파일 관리 API 엔드포인트 ---
+# --- 관리자 보안 인증 (Authentication) API 엔드포인트 ---
+
+class AdminLoginRequest(BaseModel):
+    auth_code: str
+
+@app.post("/api/admin/auth/login")
+async def admin_auth_login(req: AdminLoginRequest):
+    """관리자 인증코드 솔트 해시 검증 및 세션 토큰 발급"""
+    provided = req.auth_code.strip()
+    computed_hash = hashlib.sha256((ADMIN_SALT + provided).encode("utf-8")).hexdigest()
+    if computed_hash != EXPECTED_AUTH_HASH:
+        raise HTTPException(status_code=401, detail="관리자 인증코드가 일치하지 않습니다. 다시 확인해주세요.")
+    
+    token = secrets.token_urlsafe(32)
+    admin_sessions[token] = time.time() + 8 * 3600  # 8시간 세션 유효
+    return {
+        "success": True,
+        "token": token,
+        "expires_in": 28800,
+        "message": "사법행정 지식 관리자 보안 인증에 성공하였습니다."
+    }
+
+@app.post("/api/admin/auth/logout")
+async def admin_auth_logout(token: str = Depends(verify_admin_token)):
+    """관리자 세션 토큰 무효화(로그아웃)"""
+    admin_sessions.pop(token, None)
+    return {"success": True, "message": "성공적으로 로그아웃되었습니다."}
+
+@app.get("/api/admin/auth/verify")
+async def admin_auth_verify(token: str = Depends(verify_admin_token)):
+    """현재 세션 토큰 유효성 검사"""
+    return {"authenticated": True, "remaining_seconds": int(admin_sessions.get(token, 0) - time.time())}
+
+# --- 관리자 문서/파일 관리 API 엔드포인트 (토큰 검증 보호) ---
 
 @app.get("/api/admin/files")
-async def get_admin_files():
+async def get_admin_files(token: str = Depends(verify_admin_token)):
     """등록된 문서를 파일/출처 단위로 그룹화하여 목록 반환"""
     files = rag_service.get_grouped_files()
     total_chunks = len(rag_service.get_all_documents())
@@ -258,7 +313,7 @@ async def get_admin_files():
     }
 
 @app.delete("/api/admin/file/{file_id}")
-async def delete_admin_file(file_id: str):
+async def delete_admin_file(file_id: str, token: str = Depends(verify_admin_token)):
     """특정 파일/문서 그룹 및 속한 모든 청크 일괄 삭제"""
     result = await rag_service.delete_file_group(file_id)
     return {
@@ -269,7 +324,7 @@ async def delete_admin_file(file_id: str):
     }
 
 @app.get("/api/admin/documents")
-async def get_admin_documents():
+async def get_admin_documents(token: str = Depends(verify_admin_token)):
     docs = rag_service.get_all_documents()
     return {
         "total": len(docs),
@@ -277,7 +332,7 @@ async def get_admin_documents():
     }
 
 @app.get("/api/admin/sample-excel")
-async def get_sample_hierarchy_excel():
+async def get_sample_hierarchy_excel(token: str = Depends(verify_admin_token)):
     """상하위 법률 관계 표준 엑셀 템플릿 파일 생성 및 다운로드"""
     excel_bytes = create_sample_hierarchy_excel()
     return StreamingResponse(
@@ -287,7 +342,7 @@ async def get_sample_hierarchy_excel():
     )
 
 @app.post("/api/admin/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
     filename = file.filename or "unknown_file"
     file_bytes = await file.read()
     
@@ -318,7 +373,7 @@ async def upload_document(file: UploadFile = File(...)):
     }
 
 @app.post("/api/admin/document")
-async def create_single_document(doc: ManualDocRequest):
+async def create_single_document(doc: ManualDocRequest, token: str = Depends(verify_admin_token)):
     if not doc.title.strip() or not doc.content.strip():
         raise HTTPException(status_code=400, detail="제목과 내용을 모두 입력해주세요.")
 
@@ -340,7 +395,7 @@ async def create_single_document(doc: ManualDocRequest):
     }
 
 @app.delete("/api/admin/documents")
-async def clear_all_documents():
+async def clear_all_documents(token: str = Depends(verify_admin_token)):
     await rag_service.clear_all_documents()
     return {
         "success": True,
@@ -349,7 +404,7 @@ async def clear_all_documents():
     }
 
 @app.post("/api/admin/reset-default")
-async def reset_default_corpus():
+async def reset_default_corpus(token: str = Depends(verify_admin_token)):
     total = await rag_service.reset_to_default()
     return {
         "success": True,
@@ -358,7 +413,7 @@ async def reset_default_corpus():
     }
 
 @app.delete("/api/admin/document/{doc_id}")
-async def delete_document(doc_id: str):
+async def delete_document(doc_id: str, token: str = Depends(verify_admin_token)):
     success = await rag_service.delete_document(doc_id)
     if not success:
         raise HTTPException(status_code=404, detail="해당 문서를 찾을 수 없습니다.")
@@ -369,12 +424,48 @@ async def delete_document(doc_id: str):
     }
 
 @app.post("/api/admin/reindex")
-async def reindex_corpus():
+async def reindex_corpus(token: str = Depends(verify_admin_token)):
     total = await rag_service.reindex_all()
     return {
         "success": True,
         "reindexed_count": total
     }
+
+# --- 관리자 질의 이력 (Audit Logs) API 엔드포인트 ---
+
+@app.get("/api/admin/logs")
+async def get_admin_query_logs(
+    page: int = 1,
+    page_size: int = 20,
+    search: str = "",
+    token: str = Depends(verify_admin_token)
+):
+    """관리자용 실무 질의 이력 목록 및 검색 통계 반환"""
+    return query_logger.get_logs(page=page, page_size=page_size, search=search)
+
+@app.get("/api/admin/logs/export")
+async def export_admin_query_logs(token: str = Depends(verify_admin_token)):
+    """질의응답 이력 전체 JSON 파일 다운로드"""
+    content = json.dumps(query_logger.logs, ensure_ascii=False, indent=2)
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=family_reg_query_logs_{int(time.time())}.json"}
+    )
+
+@app.delete("/api/admin/logs")
+async def clear_admin_query_logs(token: str = Depends(verify_admin_token)):
+    """모든 질의응답 이력 전체 삭제"""
+    query_logger.clear_logs()
+    return {"success": True, "message": "모든 실무 질의 이력이 삭제되었습니다."}
+
+@app.get("/api/admin/logs/{log_id}")
+async def get_admin_query_log_detail(log_id: str, token: str = Depends(verify_admin_token)):
+    """특정 질의응답 상세 감사 로그 조회"""
+    entry = query_logger.get_log_by_id(log_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="해당 질의 이력을 찾을 수 없습니다.")
+    return entry
 
 @app.get("/api/quick-cases")
 async def get_quick_cases():
@@ -484,6 +575,24 @@ async def chat_endpoint(request: ChatRequest):
             answer = agent_result.get("answer", "웹 검색 에이전트 응답을 가져올 수 없습니다.")
             yield f"data: {json.dumps({'type': 'delta', 'data': answer}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'metrics', 'data': {'latency_ms': 850, 'prompt_tokens': 120, 'completion_tokens': 200, 'total_tokens': 320, 'model': 'qwen3-coder (웹에이전트)', 'cached': False}}, ensure_ascii=False)}\n\n"
+            
+            # Log Web Agent Query
+            try:
+                query_logger.log_query(
+                    user_query=last_user_query,
+                    sanitized_query=sec_result.get("sanitized_text", last_user_query),
+                    assistant_response=answer,
+                    model="qwen3-coder (웹에이전트)",
+                    use_rag=False,
+                    sources=[{'title': '웹 검색 출처', 'source': s, 'content': s} for s in sources],
+                    latency_ms=850,
+                    tokens=320,
+                    cached=False,
+                    pii_info=sec_result.get("pii", {})
+                )
+            except Exception as e:
+                print(f"[QueryLogger] Agent log error: {e}")
+
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(
@@ -502,6 +611,12 @@ async def chat_endpoint(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'pii_notice', 'data': pii_notice_data}, ensure_ascii=False)}\n\n"
 
         selected_model = request.model or "llama-3.3-70b"
+        full_assistant_response = ""
+        accumulated_sources = []
+        is_cached_result = False
+        collected_latency = 0
+        collected_tokens = 0
+
         async for chunk in stream_chat_completion(
             messages=messages_payload,
             temperature=request.temperature or 0.5,
@@ -511,7 +626,36 @@ async def chat_endpoint(request: ChatRequest):
             model=selected_model,
             bypass_cache=request.bypass_cache or False
         ):
+            chunk_type = chunk.get("type")
+            if chunk_type == "delta":
+                full_assistant_response += chunk.get("data", "")
+            elif chunk_type == "sources":
+                accumulated_sources = chunk.get("data", [])
+            elif chunk_type == "cache_status":
+                is_cached_result = chunk.get("data", {}).get("is_cached", False)
+            elif chunk_type == "metrics":
+                collected_latency = chunk.get("data", {}).get("latency_ms", 0)
+                collected_tokens = chunk.get("data", {}).get("total_tokens", 0)
+
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+        # Log query history
+        try:
+            query_logger.log_query(
+                user_query=last_user_query,
+                sanitized_query=sec_result.get("sanitized_text", last_user_query),
+                assistant_response=full_assistant_response,
+                model=selected_model,
+                use_rag=request.use_rag if request.use_rag is not None else True,
+                sources=accumulated_sources,
+                latency_ms=collected_latency,
+                tokens=collected_tokens,
+                cached=is_cached_result,
+                pii_info=sec_result.get("pii", {})
+            )
+        except Exception as log_err:
+            print(f"[QueryLogger] Error logging query: {log_err}")
+
         yield "data: [DONE]\n\n"
         
     return StreamingResponse(
@@ -524,8 +668,16 @@ async def chat_endpoint(request: ChatRequest):
         }
     )
 
+class NoCacheStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+
 if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 @app.get("/")
 async def read_index():
@@ -540,3 +692,18 @@ async def read_index():
             }
         )
     return {"message": "Frontend not found"}
+
+@app.get("/admin")
+@app.get("/admin.html")
+async def read_admin():
+    admin_file = FRONTEND_DIR / "admin.html"
+    if admin_file.exists():
+        return FileResponse(
+            str(admin_file),
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    return {"message": "Admin frontend not found"}

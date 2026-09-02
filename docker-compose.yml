@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  family-reg-assistant:
+    build: .
+    image: family-reg-assistant:latest
+    container_name: family-reg-assistant
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - OPENAI_BASE_URL=https://open.hasa.re.kr/v1
+      - OPENAI_API_KEY=sk-dev-Un5B6gafFJxVcRwGnw5AlT23wDGn1ooA
+    volumes:
+      - ./backend/data:/app/backend/data
