@@ -399,6 +399,13 @@ async def upload_document(file: UploadFile = File(...), token: str = Depends(ver
     if not docs:
         raise HTTPException(status_code=400, detail="문서에서 추출 가능한 유효한 지식/법령 데이터가 없습니다.")
 
+    # 동일 파일명이 기존 코퍼스에 이미 존재한다면 구버전 청크를 먼저 깔끔하게 교체 정리
+    existing_files = rag_service.get_grouped_files()
+    for ef in existing_files:
+        if ef.get("file_name") == filename or ef.get("file_name") == filename.rsplit('.', 1)[0] + ".pdf":
+            print(f"[Upload] Replacing existing version of '{filename}' ({ef.get('file_id')})...")
+            await rag_service.delete_file_group(ef.get("file_id"))
+
     added_count = await rag_service.add_documents(docs)
     return {
         "success": True,

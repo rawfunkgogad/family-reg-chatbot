@@ -269,16 +269,20 @@ function setupDashboardEvents() {
       currentDocViewMode = "files";
       viewModeFilesBtn.classList.add("active");
       viewModeChunksBtn.classList.remove("active");
-      adminFilesContainer.style.display = "flex";
-      adminChunksContainer.style.display = "none";
+      const fvc = document.getElementById("filesViewContainer");
+      const cvc = document.getElementById("chunksViewContainer");
+      if (fvc) fvc.style.display = "block";
+      if (cvc) cvc.style.display = "none";
     });
 
     viewModeChunksBtn.addEventListener("click", () => {
       currentDocViewMode = "chunks";
       viewModeChunksBtn.classList.add("active");
       viewModeFilesBtn.classList.remove("active");
-      adminChunksContainer.style.display = "block";
-      adminFilesContainer.style.display = "none";
+      const fvc = document.getElementById("filesViewContainer");
+      const cvc = document.getElementById("chunksViewContainer");
+      if (fvc) fvc.style.display = "none";
+      if (cvc) cvc.style.display = "block";
     });
   }
 
@@ -318,14 +322,26 @@ function setupDashboardEvents() {
   if (manualDocForm) {
     manualDocForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const category = document.getElementById('manualCategory').value;
-      const source = document.getElementById('manualSource').value.trim();
-      const title = document.getElementById('manualTitle').value.trim();
-      const content = document.getElementById('manualContent').value.trim();
+      const catEl = document.getElementById('docCategory') || document.getElementById('manualCategory');
+      const srcEl = document.getElementById('docSource') || document.getElementById('manualSource');
+      const titleEl = document.getElementById('docTitle') || document.getElementById('manualTitle');
+      const contentEl = document.getElementById('docContent') || document.getElementById('manualContent');
+      const saveBtn = document.getElementById('btnSaveDoc') || document.getElementById('saveManualBtn');
 
-      const saveBtn = document.getElementById('saveManualBtn');
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> bge-m3 임베딩 중...';
+      const category = catEl ? catEl.value : '일반실무';
+      const source = srcEl ? srcEl.value.trim() : '관리자 직접등록';
+      const title = titleEl ? titleEl.value.trim() : '';
+      const content = contentEl ? contentEl.value.trim() : '';
+
+      if (!title || !content) {
+        alert('제목과 내용을 모두 입력해주세요.');
+        return;
+      }
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> bge-m3 임베딩 중...';
+      }
 
       try {
         const res = await authFetch('/api/admin/document', {
@@ -345,8 +361,10 @@ function setupDashboardEvents() {
       } catch (err) {
         alert(`오류: ${err.message}`);
       } finally {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = '<i class="fa-solid fa-check"></i> 등록 및 bge-m3 임베딩 실행';
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 지식 베이스에 즉시 등록';
+        }
       }
     });
   }
@@ -607,8 +625,9 @@ async function loadAdminFiles() {
     
     if (tabFilesCount) tabFilesCount.textContent = `${adminFilesList.length}`;
     if (tabChunksCount) tabChunksCount.textContent = `${data.total_chunks}`;
-    if (adminDocCount) adminDocCount.textContent = `${data.total_chunks}건 (${adminFilesList.length}개 파일)`;
-    if (tabListCount) tabListCount.textContent = `${adminFilesList.length}개 파일`;
+    if (statTotalChunks) statTotalChunks.textContent = `${data.total_chunks}건 (${adminFilesList.length}개 파일)`;
+    if (docsTotalBadge) docsTotalBadge.textContent = `총 ${data.total_chunks}개 지식 청크 (${adminFilesList.length}개 파일)`;
+    if (tabListCount) tabListCount.textContent = `${adminFilesList.length}`;
     
     renderAdminFiles(adminFilesList);
   } catch (err) {

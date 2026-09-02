@@ -28,13 +28,22 @@ class RAGService:
         }
 
     async def initialize(self):
-        """임베딩 캐시 로드 또는 신규 임베딩 생성"""
+        """임베딩 캐시 로드 또는 신규 임베딩 생성 (기본 코퍼스 자동 보존)"""
         if CACHE_EMBEDDINGS_PATH.exists() and CACHE_METADATA_PATH.exists():
             try:
                 self.embeddings = np.load(CACHE_EMBEDDINGS_PATH)
                 with open(CACHE_METADATA_PATH, "r", encoding="utf-8") as f:
                     self.corpus = json.load(f)
-                print(f"[RAG] Loaded cached embeddings for {len(self.corpus)} docs.")
+                
+                # 기본 코퍼스 중 누락된 항목이 있다면 자동 병합
+                existing_ids = {str(d.get("id")) for d in self.corpus}
+                missing_builtin = [d for d in CORPUS_DOCS if str(d.get("id")) not in existing_ids]
+                
+                if missing_builtin:
+                    print(f"[RAG] Merging {len(missing_builtin)} missing built-in corpus items into existing cache...")
+                    await self.add_documents(missing_builtin)
+                else:
+                    print(f"[RAG] Loaded cached embeddings for {len(self.corpus)} docs.")
                 return
             except Exception as e:
                 print(f"[RAG] Failed to load cache, regenerating: {e}")
@@ -174,6 +183,65 @@ class RAGService:
 
         print(f"[RAG] Deleted document {doc_id}. Remaining: {len(self.corpus)}")
         return True
+
+    async def delete_file_group(self, file_id: str) -> Dict[str, Any]:
+        """특정 파일/문서 그룹(file_id 또는 file_name)에 속한 모든 청크 일괄 삭제 및 임베딩 갱신"""
+        if self.embeddings is None:
+            await self.initialize()
+
+        keep_corpus = []
+        keep_indices = []
+        deleted_count = 0
+
+        for idx, doc in enumerate(self.corpus):
+            doc_id = str(doc.get("id", ""))
+            group_key = doc.get("group_id")
+            if not group_key:
+                if doc_id.startswith("PDF-"):
+                    parts = doc_id.split("-")
+                    group_key = f"PDF-{parts[1]}" if len(parts) >= 2 else "PDF-GROUP"
+                elif doc_id.startswith("JSON-"):
+                    parts = doc_id.split("-")
+                    group_key = f"JSON-{parts[1]}" if len(parts) >= 2 else "JSON-GROUP"
+                elif doc_id.startswith("EXCEL-"):
+                    parts = doc_id.split("-")
+                    group_key = f"EXCEL-{parts[1]}" if len(parts) >= 2 else "EXCEL-GROUP"
+                elif doc_id.startswith("MANUAL-"):
+                    group_key = "MANUAL-GROUP"
+                else:
+                    group_key = "BUILTIN-CORPUS"
+
+            doc_fn = doc.get("file_name", "")
+            if group_key == file_id or doc_fn == file_id or (file_id in doc_id):
+                deleted_count += 1
+            else:
+                keep_corpus.append(doc)
+                keep_indices.append(idx)
+
+        self.corpus = keep_corpus
+        if self.embeddings is not None and len(self.embeddings) > 0:
+            if keep_indices:
+                self.embeddings = self.embeddings[keep_indices]
+            else:
+                self.embeddings = None
+
+        # Save to disk
+        if self.embeddings is not None:
+            np.save(CACHE_EMBEDDINGS_PATH, self.embeddings)
+        elif CACHE_EMBEDDINGS_PATH.exists():
+            try:
+                CACHE_EMBEDDINGS_PATH.unlink()
+            except Exception:
+                pass
+
+        with open(CACHE_METADATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(self.corpus, f, ensure_ascii=False, indent=2)
+
+        print(f"[RAG] Deleted file group '{file_id}' ({deleted_count} chunks). Remaining: {len(self.corpus)}")
+        return {
+            "deleted_count": deleted_count,
+            "remaining_docs": len(self.corpus)
+        }
 
     async def clear_all_documents(self) -> bool:
         """등록된 모든 RAG 지식 문서 및 임베딩 인덱스 전체 삭제"""
