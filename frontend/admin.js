@@ -82,6 +82,27 @@ async function authFetch(url, options = {}) {
   return res;
 }
 
+// Floating Toast Helper
+function showAdminToast(msg, type = 'success', duration = 4000) {
+  let container = document.getElementById('adminToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'adminToastContainer';
+    container.className = 'admin-toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `admin-toast ${type}`;
+  const icon = type === 'success' ? 'fa-circle-check' : (type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-info');
+  toast.innerHTML = `<i class="fa-solid ${icon}" style="font-size: 16px;"></i> <span>${escapeHtml(msg)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
@@ -256,7 +277,8 @@ function setupDashboardEvents() {
       const targetPane = document.getElementById(tabId);
       if (targetPane) {
         targetPane.classList.add("active");
-        targetPane.style.display = "block";
+        // #tab-list needs flex display for split explorer to fill remaining height
+        targetPane.style.display = (tabId === "tab-list") ? "flex" : "block";
       }
 
       if (tabId === "tab-list") {
@@ -580,10 +602,7 @@ function setupDashboardEvents() {
       btnExportCorpus.disabled = true;
       btnExportCorpus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 백업 생성 중...';
       try {
-        const token = sessionStorage.getItem("admin_session_token");
-        const res = await fetch('/api/admin/corpus/export', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch('/api/admin/corpus/export');
         if (!res.ok) throw new Error('백업 파일 생성에 실패했습니다.');
         
         const blob = await res.blob();
@@ -591,13 +610,16 @@ function setupDashboardEvents() {
         const a = document.createElement('a');
         a.href = url;
         const nowStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        a.download = `scourt_family_knowledge_backup_${nowStr}.json`;
+        const filename = `scourt_family_knowledge_backup_${nowStr}.json`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         a.remove();
         window.URL.revokeObjectURL(url);
+        
+        showAdminToast(`지식 코퍼스 및 임베딩 백업 파일(${filename})이 정상 다운로드되었습니다!`, 'success');
       } catch (err) {
-        alert(`백업 오류: ${err.message}`);
+        showAdminToast(`백업 오류: ${err.message}`, 'error');
       } finally {
         btnExportCorpus.disabled = false;
         btnExportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 지식 백업 (Export)';
@@ -617,8 +639,8 @@ function setupDashboardEvents() {
       const file = e.target.files[0];
       if (!file) return;
 
-      if (!file.name.toLowerCase().endswith?.('.json') && !file.name.toLowerCase().endsWith('.json')) {
-        alert('백업 파일은 .json 형식이어야 합니다.');
+      if (!file.name.toLowerCase().endsWith('.json')) {
+        showAdminToast('백업 파일은 .json 형식이어야 합니다.', 'error');
         corpusImportFileInput.value = '';
         return;
       }
@@ -641,14 +663,14 @@ function setupDashboardEvents() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          alert(`성공: ${data.total_docs}건의 지식 코퍼스 및 임베딩이 100% 완벽하게 복원되었습니다!`);
+          showAdminToast(`총 ${data.total_docs}건의 지식 코퍼스 및 임베딩이 100% 완벽하게 복원되었습니다!`, 'success');
           await loadAdminFiles();
           await loadAdminDocuments();
         } else {
-          alert(`복원 실패: ${data.detail || '오류 발생'}`);
+          showAdminToast(`복원 실패: ${data.detail || '오류 발생'}`, 'error');
         }
       } catch (err) {
-        alert(`복원 오류: ${err.message}`);
+        showAdminToast(`복원 오류: ${err.message}`, 'error');
       } finally {
         btnImportCorpus.disabled = false;
         btnImportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 지식 복원 (Import)';

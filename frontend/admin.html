@@ -19,17 +19,16 @@
   <!-- Marked Markdown Parser -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <link rel="stylesheet" href="/static/style.css?v=4.0.0">
+  <link rel="stylesheet" href="/static/style.css?v=4.2.0">
   <style>
     /* Standalone Admin Page Layout */
     .admin-page-container {
-      min-height: 100vh;
+      height: 100vh;
       width: 100vw;
       display: flex;
       flex-direction: column;
       background: radial-gradient(circle at 50% 0%, #152238 0%, #090e17 75%);
-      overflow-y: auto;
-      overflow-x: hidden;
+      overflow: hidden;
       color: #e2e8f0;
     }
     
@@ -220,17 +219,7 @@
       color: #dc2626;
     }
 
-    /* Admin Content Dashboard Layout */
-    .admin-dashboard-wrapper {
-      flex: 1;
-      width: 100%;
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 16px 24px 40px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
+    /* (First declaration removed — see below for the canonical one) */
 
     /* Header action buttons */
     .btn-goto-portal {
@@ -550,24 +539,37 @@
     .admin-dashboard-wrapper {
       flex: 1;
       width: 100%;
-      max-width: 1520px;
+      max-width: 1560px;
       margin: 0 auto;
-      padding: 20px 32px 60px;
+      padding: 12px 24px 8px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 10px;
+      box-sizing: border-box;
+      min-height: 0;
+      overflow: hidden;
     }
 
-    /* Tab Panes: No nested scrollbars, natural full height */
+    /* Tab Panes: Flex layout so children can fill remaining height */
     .tab-pane {
-      padding: 16px 0;
+      padding: 6px 0 0 0;
       display: none;
-      overflow: visible;
+      overflow: hidden;
       max-height: none;
+      min-height: 0;
     }
 
     .tab-pane.active {
       display: block;
+    }
+
+    /* #tab-list needs flex layout so split explorer fills remaining height */
+    #tab-list.active {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
     }
 
     /* Upload Dropzone & Guide */
@@ -2062,14 +2064,16 @@
        ========================================================================= */
     .doc-split-explorer {
       display: flex;
-      gap: 20px;
+      gap: 16px;
       width: 100%;
-      min-height: 720px;
+      flex: 1;
+      min-height: 0;
       background: rgba(15, 23, 42, 0.6);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 12px;
-      padding: 16px;
+      padding: 12px;
       box-sizing: border-box;
+      overflow: hidden;
     }
 
     [data-theme="light"] .doc-split-explorer {
@@ -2080,9 +2084,10 @@
 
     /* Left Sidebar: Document List */
     .doc-split-sidebar {
-      width: 380px;
-      min-width: 320px;
-      max-width: 420px;
+      width: 360px;
+      min-width: 300px;
+      max-width: 400px;
+      height: 100%;
       display: flex;
       flex-direction: column;
       background: rgba(10, 15, 28, 0.7);
@@ -2179,9 +2184,9 @@
     .doc-sidebar-list {
       flex: 1;
       overflow-y: auto;
-      max-height: calc(100vh - 340px);
-      min-height: 560px;
+      min-height: 0;
       padding: 12px;
+      padding-bottom: 30px;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -2487,12 +2492,56 @@
     .doc-chunks-scroll-area {
       flex: 1;
       overflow-y: auto;
-      max-height: calc(100vh - 340px);
-      min-height: 560px;
-      padding: 20px 22px;
+      min-height: 0;
+      padding: 16px 20px 100px 20px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
+    }
+
+    /* Admin Toast Notifications */
+    .admin-toast-container {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .admin-toast {
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #38bdf8;
+      border-radius: 8px;
+      padding: 14px 20px;
+      color: #f8fafc;
+      font-size: 13.5px;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.25);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      backdrop-filter: blur(10px);
+      animation: slideInToast 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+
+    .admin-toast.success {
+      border-color: #34d399;
+      background: rgba(6, 78, 59, 0.95);
+    }
+
+    .admin-toast.error {
+      border-color: #f87171;
+      background: rgba(127, 29, 29, 0.95);
+    }
+
+    @keyframes slideInToast {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
     }
 
     .doc-chunks-scroll-area::-webkit-scrollbar {
@@ -3292,6 +3341,6 @@
     </div>
   </div>
 
-  <script src="/static/admin.js?v=4.0.0"></script>
+  <script src="/static/admin.js?v=4.2.0"></script>
 </body>
 </html>

@@ -506,6 +506,85 @@ async def reindex_corpus(token: str = Depends(verify_admin_token)):
         "reindexed_count": total
     }
 
+# --- 지식 코퍼스 백업(Export) 및 1초 무손실 복원(Import) API 엔드포인트 ---
+
+@app.get("/api/admin/corpus/export")
+async def export_corpus_package(token: str = Depends(verify_admin_token)):
+    """전체 지식 코퍼스 문서 및 임베딩 벡터를 JSON 백업 패키지로 내보내기"""
+    docs = rag_service.get_all_documents()
+    emb_list = None
+    if rag_service.document_embeddings is not None and len(rag_service.document_embeddings) == len(docs):
+        emb_list = rag_service.document_embeddings.tolist()
+    
+    export_payload = {
+        "version": "4.0.0",
+        "exported_at": int(time.time()),
+        "total_docs": len(docs),
+        "documents": docs,
+        "embeddings": emb_list
+    }
+    
+    content = json.dumps(export_payload, ensure_ascii=False, indent=2)
+    timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename=scourt_family_knowledge_backup_{timestamp_str}.json",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+    )
+
+@app.post("/api/admin/corpus/import")
+async def import_corpus_package(
+    file: UploadFile = File(...),
+    token: str = Depends(verify_admin_token)
+):
+    """백업 JSON 파일로부터 전체 지식 코퍼스 및 임베딩 벡터 1초 무손실 복원"""
+    try:
+        content_bytes = await file.read()
+        data = json.loads(content_bytes.decode("utf-8"))
+        
+        docs = []
+        if isinstance(data, list):
+            docs = data
+        elif isinstance(data, dict):
+            docs = data.get("documents", [])
+        
+        if not docs or not isinstance(docs, list):
+            raise HTTPException(status_code=400, detail="유효한 지식 문서 목록이 포함되어 있지 않습니다.")
+        
+        import numpy as np
+        emb_list = data.get("embeddings") if isinstance(data, dict) else None
+        
+        # 1. 문서 복원
+        rag_service.documents = docs
+        
+        # 2. 임베딩 복원 또는 재색인
+        if emb_list and isinstance(emb_list, list) and len(emb_list) == len(docs):
+            rag_service.document_embeddings = np.array(emb_list, dtype=np.float32)
+            # 캐시 파일 영구 저장
+            np.save(str(DATA_DIR / "corpus_embeddings.npy"), rag_service.document_embeddings)
+            print(f"[RAG Import] Successfully restored {len(docs)} documents and pre-computed embeddings.")
+        else:
+            print(f"[RAG Import] Re-indexing {len(docs)} documents with bge-m3...")
+            await rag_service.reindex_all()
+        
+        # 3. metadata.json 영구 저장
+        metadata_file = DATA_DIR / "corpus_metadata.json"
+        with open(metadata_file, "w", encoding="utf-8") as f:
+            json.dump(docs, f, ensure_ascii=False, indent=2)
+            
+        return {
+            "success": True,
+            "message": f"{len(docs)}건의 지식 코퍼스 및 임베딩이 성공적으로 복원되었습니다.",
+            "total_docs": len(docs)
+        }
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="유효한 JSON 파일 형식이 아닙니다.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"복원 실패: {str(e)}")
+
 # --- 관리자 질의 이력 (Audit Logs) API 엔드포인트 ---
 
 @app.get("/api/admin/logs")
