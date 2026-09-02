@@ -376,6 +376,39 @@ async def get_sample_hierarchy_excel(token: str = Depends(verify_admin_token)):
         headers={"Content-Disposition": "attachment; filename=legal_hierarchy_template.xlsx"}
     )
 
+@app.get("/api/admin/corpus/export")
+async def export_admin_corpus(token: str = Depends(verify_admin_token)):
+    """전체 지식 코퍼스 및 임베딩 벡터를 JSON 백업 파일로 직렬화하여 다운로드"""
+    package = rag_service.export_corpus_package()
+    timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    filename = f"scourt_family_reg_knowledge_backup_{timestamp_str}.json"
+    
+    json_bytes = json.dumps(package, ensure_ascii=False, indent=2).encode("utf-8")
+    return StreamingResponse(
+        io.BytesIO(json_bytes),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.post("/api/admin/corpus/import")
+async def import_admin_corpus(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
+    """백업 JSON 파일로부터 지식 코퍼스 및 임베딩 벡터 복원"""
+    if not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="백업 파일은 .json 형식이어야 합니다.")
+    
+    try:
+        content_bytes = await file.read()
+        package_data = json.loads(content_bytes.decode("utf-8"))
+        result = await rag_service.import_corpus_package(package_data, merge_mode="replace")
+        return {
+            "success": True,
+            "message": f"성공적으로 {result['total_docs']}개의 지식 청크가 복원되었습니다.",
+            "total_docs": result["total_docs"],
+            "embeddings_restored_directly": result.get("embeddings_restored_directly", False)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"백업 파일 복원 중 오류 발생: {str(e)}")
+
 @app.post("/api/admin/upload")
 async def upload_document(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
     filename = file.filename or "unknown_file"

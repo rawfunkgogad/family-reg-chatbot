@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import asyncio
 import httpx
 import numpy as np
@@ -273,6 +274,79 @@ class RAGService:
             return 0
         await self._generate_and_save_corpus_embeddings()
         return len(self.corpus)
+
+    def export_corpus_package(self) -> Dict[str, Any]:
+        """전체 지식 코퍼스 및 임베딩 벡터를 통합 백업 패키지로 직렬화하여 반환"""
+        return {
+            "system": "scourt_family_reg_rag",
+            "version": "4.0.0",
+            "exported_at": int(time.time()),
+            "total_docs": len(self.corpus),
+            "embedding_model": EMBEDDING_MODEL,
+            "has_embeddings": (self.embeddings is not None and len(self.embeddings) == len(self.corpus)),
+            "corpus": self.corpus,
+            "embeddings": self.embeddings.tolist() if self.embeddings is not None else None
+        }
+
+    async def import_corpus_package(self, package_data: Dict[str, Any], merge_mode: str = "replace") -> Dict[str, Any]:
+        """
+        백업 JSON 패키지로부터 지식 코퍼스 및 임베딩 벡터를 복원
+        - merge_mode='replace': 기존 데이터를 백업본으로 완전 교체 (기본값)
+        - merge_mode='merge': 기존 데이터에 신규 항목을 병합
+        """
+        imported_corpus = package_data.get("corpus", [])
+        if not isinstance(imported_corpus, list) or len(imported_corpus) == 0:
+            raise ValueError("가져올 지식 코퍼스(corpus) 데이터가 유효하지 않거나 비어있습니다.")
+
+        raw_embeddings = package_data.get("embeddings")
+        has_valid_embeddings = (
+            raw_embeddings is not None and 
+            isinstance(raw_embeddings, list) and 
+            len(raw_embeddings) == len(imported_corpus)
+        )
+
+        if merge_mode == "replace":
+            self.corpus = list(imported_corpus)
+            if has_valid_embeddings:
+                self.embeddings = np.array(raw_embeddings, dtype=np.float32)
+            else:
+                self.embeddings = None
+        else:
+            # Merge mode
+            existing_ids = {str(d.get("id")) for d in self.corpus}
+            to_add_docs = []
+            to_add_vectors = []
+            for idx, doc in enumerate(imported_corpus):
+                if str(doc.get("id")) not in existing_ids:
+                    to_add_docs.append(doc)
+                    if has_valid_embeddings:
+                        to_add_vectors.append(raw_embeddings[idx])
+            
+            if to_add_docs:
+                self.corpus.extend(to_add_docs)
+                if has_valid_embeddings and len(to_add_vectors) == len(to_add_docs):
+                    add_v_arr = np.array(to_add_vectors, dtype=np.float32)
+                    if self.embeddings is None:
+                        self.embeddings = add_v_arr
+                    else:
+                        self.embeddings = np.vstack([self.embeddings, add_v_arr])
+
+        # If embeddings are missing, auto-generate them
+        if self.embeddings is None or len(self.embeddings) != len(self.corpus):
+            print(f"[RAG] Generating embeddings for imported corpus ({len(self.corpus)} docs)...")
+            await self._generate_and_save_corpus_embeddings()
+        else:
+            # Save directly to disk
+            np.save(CACHE_EMBEDDINGS_PATH, self.embeddings)
+            with open(CACHE_METADATA_PATH, "w", encoding="utf-8") as f:
+                json.dump(self.corpus, f, ensure_ascii=False, indent=2)
+
+        print(f"[RAG] Successfully imported corpus package: {len(self.corpus)} documents active.")
+        return {
+            "success": True,
+            "total_docs": len(self.corpus),
+            "embeddings_restored_directly": has_valid_embeddings
+        }
 
     def get_all_documents(self) -> List[Dict[str, Any]]:
         """전체 등록 문서 목록 반환"""

@@ -2,7 +2,8 @@
 let adminToken = sessionStorage.getItem("court_admin_token") || "";
 let adminFilesList = [];
 let adminDocsList = [];
-let currentDocViewMode = "files"; // "files" or "chunks"
+let currentDocViewMode = "split"; // "split" | "files" | "chunks"
+let currentTab = "tab-upload"; // active tab id
 
 // DOM Elements
 const authSection = document.getElementById("authSection");
@@ -246,11 +247,20 @@ function setupDashboardEvents() {
       tab.classList.add("active");
       
       const tabId = tab.dataset.tab;
-      document.querySelectorAll(".tab-pane").forEach(p => p.style.display = "none");
+      currentTab = tabId;
+
+      document.querySelectorAll(".tab-pane").forEach(p => {
+        p.classList.remove("active");
+        p.style.display = "none";
+      });
       const targetPane = document.getElementById(tabId);
-      if (targetPane) targetPane.style.display = "block";
+      if (targetPane) {
+        targetPane.classList.add("active");
+        targetPane.style.display = "block";
+      }
 
       if (tabId === "tab-list") {
+        setDocViewMode(currentDocViewMode || 'split');
         loadAdminFiles();
         loadAdminDocuments();
       } else if (tabId === "tab-metrics") {
@@ -263,26 +273,41 @@ function setupDashboardEvents() {
     });
   });
 
-  // View Mode Switcher in Tab 3 (Files vs Chunks)
-  if (viewModeFilesBtn && viewModeChunksBtn) {
-    viewModeFilesBtn.addEventListener("click", () => {
-      currentDocViewMode = "files";
-      viewModeFilesBtn.classList.add("active");
-      viewModeChunksBtn.classList.remove("active");
-      const fvc = document.getElementById("filesViewContainer");
-      const cvc = document.getElementById("chunksViewContainer");
-      if (fvc) fvc.style.display = "block";
-      if (cvc) cvc.style.display = "none";
-    });
+  // View Mode Switcher in Tab 3 (Split vs Files vs Chunks Table)
+  const viewModeSplitBtn = document.getElementById("viewModeSplitBtn");
+  const viewModeFilesBtn = document.getElementById("viewModeFilesBtn");
+  const viewModeChunksBtn = document.getElementById("viewModeChunksBtn");
 
-    viewModeChunksBtn.addEventListener("click", () => {
-      currentDocViewMode = "chunks";
-      viewModeChunksBtn.classList.add("active");
-      viewModeFilesBtn.classList.remove("active");
-      const fvc = document.getElementById("filesViewContainer");
-      const cvc = document.getElementById("chunksViewContainer");
-      if (fvc) fvc.style.display = "none";
-      if (cvc) cvc.style.display = "block";
+  if (viewModeSplitBtn) viewModeSplitBtn.addEventListener("click", () => setDocViewMode("split"));
+  if (viewModeFilesBtn) viewModeFilesBtn.addEventListener("click", () => setDocViewMode("files"));
+  if (viewModeChunksBtn) viewModeChunksBtn.addEventListener("click", () => setDocViewMode("chunks"));
+
+  // Real-time Search Filter in Tab 3
+  const docSearchInput = document.getElementById("docSearchInput");
+  if (docSearchInput) {
+    docSearchInput.addEventListener("input", (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      if (!q) {
+        renderAdminFiles(adminFilesList);
+        renderAdminDocTable(adminDocsList);
+        return;
+      }
+      // Filter files & internal chunks
+      const filteredFiles = adminFilesList.filter(f => 
+        (f.file_name && f.file_name.toLowerCase().includes(q)) ||
+        (f.category && f.category.toLowerCase().includes(q)) ||
+        (f.chunks && f.chunks.some(c => (c.title && c.title.toLowerCase().includes(q)) || (c.preview && c.preview.toLowerCase().includes(q))))
+      );
+      renderAdminFiles(filteredFiles);
+
+      // Filter flat chunks table
+      const filteredChunks = adminDocsList.filter(d => 
+        (d.title && d.title.toLowerCase().includes(q)) ||
+        (d.content && d.content.toLowerCase().includes(q)) ||
+        (d.source && d.source.toLowerCase().includes(q)) ||
+        (d.category && d.category.toLowerCase().includes(q))
+      );
+      renderAdminDocTable(filteredChunks);
     });
   }
 
@@ -445,6 +470,21 @@ function setupDashboardEvents() {
     });
   }
 
+  // Doc View Mode Switching (Split Master-Detail, Files Grouped, Chunks Table)
+  // Global Keyboard Navigation for 2-Column Split View
+  document.addEventListener('keydown', (e) => {
+    if (currentTab === 'tab-list' && currentDocViewMode === 'split') {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+      if (e.key === 'ArrowLeft' || (e.altKey && e.key === 'ArrowLeft')) {
+        e.preventDefault();
+        navigateSplitChunk(-1);
+      } else if (e.key === 'ArrowRight' || (e.altKey && e.key === 'ArrowRight')) {
+        e.preventDefault();
+        navigateSplitChunk(1);
+      }
+    }
+  });
+
   // Search filter for both Files and Chunks
   if (docSearchInput) {
     docSearchInput.addEventListener('input', (e) => {
@@ -533,6 +573,90 @@ function setupDashboardEvents() {
     });
   }
 
+  // Export Knowledge Base Package
+  const btnExportCorpus = document.getElementById("btnExportCorpus");
+  if (btnExportCorpus) {
+    btnExportCorpus.addEventListener("click", async () => {
+      btnExportCorpus.disabled = true;
+      btnExportCorpus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 백업 생성 중...';
+      try {
+        const token = sessionStorage.getItem("admin_session_token");
+        const res = await fetch('/api/admin/corpus/export', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('백업 파일 생성에 실패했습니다.');
+        
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const nowStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        a.download = `scourt_family_knowledge_backup_${nowStr}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(`백업 오류: ${err.message}`);
+      } finally {
+        btnExportCorpus.disabled = false;
+        btnExportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 지식 백업 (Export)';
+      }
+    });
+  }
+
+  // Import Knowledge Base Package
+  const btnImportCorpus = document.getElementById("btnImportCorpus");
+  const corpusImportFileInput = document.getElementById("corpusImportFileInput");
+  if (btnImportCorpus && corpusImportFileInput) {
+    btnImportCorpus.addEventListener("click", () => {
+      corpusImportFileInput.click();
+    });
+
+    corpusImportFileInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!file.name.toLowerCase().endswith?.('.json') && !file.name.toLowerCase().endsWith('.json')) {
+        alert('백업 파일은 .json 형식이어야 합니다.');
+        corpusImportFileInput.value = '';
+        return;
+      }
+
+      if (!confirm(`'${file.name}' 백업 파일로부터 전체 지식 베이스를 복원하시겠습니까?\n(기존 데이터가 백업본으로 안전하게 교체됩니다)`)) {
+        corpusImportFileInput.value = '';
+        return;
+      }
+
+      btnImportCorpus.disabled = true;
+      btnImportCorpus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 지식 복원 중...';
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await authFetch('/api/admin/corpus/import', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`성공: ${data.total_docs}건의 지식 코퍼스 및 임베딩이 100% 완벽하게 복원되었습니다!`);
+          await loadAdminFiles();
+          await loadAdminDocuments();
+        } else {
+          alert(`복원 실패: ${data.detail || '오류 발생'}`);
+        }
+      } catch (err) {
+        alert(`복원 오류: ${err.message}`);
+      } finally {
+        btnImportCorpus.disabled = false;
+        btnImportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 지식 복원 (Import)';
+        corpusImportFileInput.value = '';
+      }
+    });
+  }
+
   // Metrics handlers
   if (refreshMetricsBtn) {
     refreshMetricsBtn.addEventListener('click', loadMetricsStats);
@@ -615,6 +739,337 @@ function showUploadStatus(msg, type) {
   uploadStatus.innerHTML = msg;
 }
 
+// Drawer state tracking (per fileId)
+const drawerStates = {}; // fileId -> { page: 1, pageSize: 'all', search: '', expanded: true }
+
+function getDrawerState(fileId) {
+  if (!drawerStates[fileId]) {
+    drawerStates[fileId] = { page: 1, pageSize: 'all', search: '', expanded: true };
+  }
+  return drawerStates[fileId];
+}
+
+// =========================================================================
+// 2-Column Document-to-Chunks Explorer Split View Logic (Tab 3)
+// Left: Target Document Files | Right: Chunks List for Selected Document
+// =========================================================================
+currentDocViewMode = 'split'; // 'split' | 'files' | 'chunks'
+const splitDocState = {
+  selectedFileId: null,
+  docSearch: '',
+  chunkSearch: '',
+  expandedChunks: {}, // chunkId -> boolean
+  allExpanded: true
+};
+window.splitDocState = splitDocState;
+
+// Mode Switching (Split, Files, Table)
+function setDocViewMode(mode) {
+  currentDocViewMode = mode;
+  const splitBtn = document.getElementById('viewModeSplitBtn');
+  const filesBtn = document.getElementById('viewModeFilesBtn');
+  const chunksBtn = document.getElementById('viewModeChunksBtn');
+
+  const splitCont = document.getElementById('splitViewContainer');
+  const filesCont = document.getElementById('filesViewContainer');
+  const chunksCont = document.getElementById('chunksViewContainer');
+
+  if (splitBtn) splitBtn.classList.toggle('active', mode === 'split');
+  if (filesBtn) filesBtn.classList.toggle('active', mode === 'files');
+  if (chunksBtn) chunksBtn.classList.toggle('active', mode === 'chunks');
+
+  if (splitCont) splitCont.style.display = (mode === 'split') ? 'flex' : 'none';
+  if (filesCont) filesCont.style.display = (mode === 'files') ? 'block' : 'none';
+  if (chunksCont) chunksCont.style.display = (mode === 'chunks') ? 'block' : 'none';
+
+  if (mode === 'split') {
+    renderSplitView();
+  }
+}
+window.setDocViewMode = setDocViewMode;
+
+// Render Document -> Chunks Split Explorer View
+function renderSplitView() {
+  const docListContainer = document.getElementById('splitDocListContainer');
+  const docCountBadge = document.getElementById('splitDocCountBadge');
+  const contentContainer = document.getElementById('splitDocContentContainer');
+
+  if (!docListContainer || !contentContainer) return;
+
+  if (adminFilesList.length === 0) {
+    if (docCountBadge) docCountBadge.textContent = '총 0개 파일';
+    docListContainer.innerHTML = `
+      <div style="text-align: center; color: #64748b; padding: 40px 16px;">
+        <i class="fa-solid fa-folder-open" style="font-size: 32px; margin-bottom: 8px; color: #475569;"></i>
+        <p style="font-size: 13px;">등록된 지식 문서가 없습니다.</p>
+      </div>
+    `;
+    renderSplitDocContent(null);
+    return;
+  }
+
+  // Filter Documents by docSearch
+  const docQ = (splitDocState.docSearch || '').toLowerCase().trim();
+  const filteredDocs = adminFilesList.filter(f => 
+    !docQ || 
+    (f.file_name && f.file_name.toLowerCase().includes(docQ)) ||
+    (f.category && f.category.toLowerCase().includes(docQ))
+  );
+
+  if (docCountBadge) {
+    docCountBadge.textContent = `총 ${adminFilesList.length}개 파일 (표시 ${filteredDocs.length}개)`;
+  }
+
+  // Ensure an active document is selected
+  const hasSelected = filteredDocs.some(f => f.file_id === splitDocState.selectedFileId);
+  if (!hasSelected && filteredDocs.length > 0) {
+    splitDocState.selectedFileId = filteredDocs[0].file_id;
+  } else if (filteredDocs.length === 0) {
+    splitDocState.selectedFileId = null;
+  }
+
+  // 1. Render Left Sidebar Documents List
+  if (filteredDocs.length === 0) {
+    docListContainer.innerHTML = `
+      <div style="text-align: center; color: #64748b; padding: 40px 16px;">
+        <i class="fa-solid fa-magnifying-glass" style="font-size: 24px; margin-bottom: 8px; color: #475569;"></i>
+        <p style="font-size: 13px;">'${escapeHtml(docQ)}' 검색 결과와 일치하는 문서가 없습니다.</p>
+      </div>
+    `;
+  } else {
+    docListContainer.innerHTML = filteredDocs.map((file, idx) => {
+      const isActive = file.file_id === splitDocState.selectedFileId;
+      let iconClass = 'pdf';
+      let iconTag = 'fa-file-pdf';
+      if (file.file_type === 'EXCEL') {
+        iconClass = 'excel';
+        iconTag = 'fa-file-excel';
+      } else if (file.file_type === 'JSON') {
+        iconClass = 'json';
+        iconTag = 'fa-file-code';
+      } else if (file.file_type === 'BUILTIN') {
+        iconClass = 'builtin';
+        iconTag = 'fa-book-bookmark';
+      } else if (file.file_type === 'MANUAL') {
+        iconClass = 'manual';
+        iconTag = 'fa-pen-nib';
+      }
+
+      const count = file.chunks ? file.chunks.length : (file.chunks_count || 0);
+      const kbSize = (file.total_chars / 1024).toFixed(1);
+
+      return `
+        <div class="doc-sidebar-item ${isActive ? 'active' : ''}" id="doc-card-${file.file_id}" onclick="selectSplitDocument('${file.file_id}')">
+          <div class="doc-item-header">
+            <div class="doc-item-icon ${iconClass}">
+              <i class="fa-solid ${iconTag}"></i>
+            </div>
+            <div class="doc-item-name" title="${escapeHtml(file.file_name)}">
+              ${escapeHtml(file.file_name)}
+            </div>
+          </div>
+          <div class="doc-item-meta">
+            <span class="doc-item-badge">${escapeHtml(file.category || '기타')}</span>
+            <span class="doc-item-chunks-count"><i class="fa-solid fa-layer-group"></i> ${count}개 ${file.file_type === 'EXCEL' ? '체인' : '청크'}</span>
+            <span class="doc-item-badge">약 ${kbSize} KB</span>
+            ${isActive ? '<span class="doc-item-status-tag"><i class="fa-solid fa-check"></i> 열람 중 ➔</span>' : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 2. Render Right Content Panel for Selected Document
+  renderSplitDocContent(splitDocState.selectedFileId);
+}
+window.renderSplitView = renderSplitView;
+
+// Select a specific document
+window.selectSplitDocument = function(fileId) {
+  splitDocState.selectedFileId = fileId;
+  splitDocState.chunkSearch = ''; // reset in-doc search query
+  renderSplitView();
+};
+
+// Search documents in left sidebar
+window.onSplitDocSearch = function(query) {
+  splitDocState.docSearch = query;
+  renderSplitView();
+};
+
+// Search chunks inside active document
+window.onSplitChunkSearch = function(query) {
+  splitDocState.chunkSearch = query;
+  renderSplitDocContent(splitDocState.selectedFileId);
+};
+
+// Toggle all chunks expand/collapse inside active document
+window.toggleAllSplitChunks = function(fileId) {
+  splitDocState.allExpanded = !splitDocState.allExpanded;
+  const file = adminFilesList.find(f => f.file_id === fileId);
+  if (file && file.chunks) {
+    file.chunks.forEach(c => {
+      splitDocState.expandedChunks[c.id] = splitDocState.allExpanded;
+    });
+  }
+  renderSplitDocContent(fileId);
+};
+
+// Toggle single chunk expand/collapse
+window.toggleSplitChunkExpand = function(chunkId) {
+  splitDocState.expandedChunks[chunkId] = !splitDocState.expandedChunks[chunkId];
+  const box = document.getElementById(`split-chunk-text-${chunkId}`);
+  const btn = document.getElementById(`split-chunk-btn-${chunkId}`);
+  if (box && btn) {
+    const isExp = splitDocState.expandedChunks[chunkId];
+    box.classList.toggle('collapsed', !isExp);
+    btn.innerHTML = isExp ? '<i class="fa-solid fa-chevron-up"></i> 본문 접기' : '<i class="fa-solid fa-chevron-down"></i> 본문 전체 펼치기';
+  }
+};
+
+// Render Right Panel with all chunks of selected document
+function renderSplitDocContent(fileId) {
+  const contentContainer = document.getElementById('splitDocContentContainer');
+  if (!contentContainer) return;
+
+  if (!fileId) {
+    contentContainer.innerHTML = `
+      <div class="split-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center; padding: 40px; color: #94a3b8;">
+        <i class="fa-solid fa-folder-open" style="font-size: 52px; color: #38bdf8; opacity: 0.8; margin-bottom: 12px;"></i>
+        <h4 style="color: #f1f5f9; font-size: 17px; margin-bottom: 6px;">열람할 문서를 좌측 목록에서 선택해 주세요</h4>
+        <p style="font-size: 13.5px; color: #94a3b8; max-width: 360px;">좌측의 대상 문서를 클릭하시면 해당 문서에 포함된 모든 법령 조문 및 지식 청크가 이곳에 한눈에 펼쳐집니다.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const file = adminFilesList.find(f => f.file_id === fileId);
+  if (!file) return;
+
+  const chunks = file.chunks || [];
+  const chunkQ = (splitDocState.chunkSearch || '').toLowerCase().trim();
+  const filteredChunks = chunks.filter(c => 
+    !chunkQ ||
+    (c.title && c.title.toLowerCase().includes(chunkQ)) ||
+    (c.content && c.content.toLowerCase().includes(chunkQ)) ||
+    (c.source && c.source.toLowerCase().includes(chunkQ)) ||
+    (c.category && c.category.toLowerCase().includes(chunkQ))
+  );
+
+  const kbSize = (file.total_chars / 1024).toFixed(1);
+  const dateStr = file.created_at ? new Date(file.created_at * 1000).toLocaleDateString('ko-KR') : '기본 탑재';
+
+  let chunksCardsHtml = '';
+  if (filteredChunks.length === 0) {
+    chunksCardsHtml = `
+      <div style="text-align: center; color: #64748b; padding: 60px 20px;">
+        <i class="fa-solid fa-magnifying-glass" style="font-size: 28px; margin-bottom: 10px; color: #475569;"></i>
+        <p style="font-size: 14px;">'${escapeHtml(chunkQ)}' 검색 조건에 일치하는 조문 청크가 없습니다.</p>
+      </div>
+    `;
+  } else {
+    chunksCardsHtml = filteredChunks.map((chunk, idx) => {
+      const fullText = chunk.content || chunk.preview || '';
+      const isLong = fullText.length > 280;
+      const isExp = splitDocState.expandedChunks[chunk.id] !== false; // default true/expanded
+      
+      let hierarchyHtml = '';
+      if (chunk.hierarchy_data) {
+        const hd = chunk.hierarchy_data;
+        hierarchyHtml = `
+          <div class="hierarchy-breadcrumb-chain" style="margin: 4px 0 8px 0;">
+            ${hd.primary_law ? `<span class="hierarchy-chip tier-1"><i class="fa-solid fa-scale-balanced"></i> 법률: ${escapeHtml(hd.primary_law)}</span>` : ''}
+            ${hd.sub_rule ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-2"><i class="fa-solid fa-scroll"></i> 규칙: ${escapeHtml(hd.sub_rule)}</span>` : ''}
+            ${hd.directive ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-3"><i class="fa-solid fa-book"></i> 예규: ${escapeHtml(hd.directive)}</span>` : ''}
+            ${hd.precedent ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-4"><i class="fa-solid fa-gavel"></i> 선례: ${escapeHtml(hd.precedent)}</span>` : ''}
+          </div>
+        `;
+      }
+
+      return `
+        <div class="split-chunk-full-card" id="split-chunk-card-${chunk.id}">
+          <div class="chunk-card-top-bar">
+            <div class="chunk-card-title-group">
+              <span class="chunk-num-badge">#${idx + 1}</span>
+              <span class="chunk-main-title">${escapeHtml(chunk.title || '(제목 없음)')}</span>
+              ${chunk.page_number ? `<span class="chunk-page-tag"><i class="fa-regular fa-file-lines"></i> 제${chunk.page_number}p</span>` : ''}
+              <span class="chunk-page-tag"><i class="fa-solid fa-font"></i> ${fullText.length}자</span>
+            </div>
+            <div class="doc-chunks-actions">
+              <button class="btn-chunk-action" onclick="copyChunkText('${chunk.id}')" title="조문 본문 복사">
+                <i class="fa-regular fa-copy"></i> 복사
+              </button>
+              <button class="btn-chunk-action" onclick="openChunkDetailModal('${chunk.id}')" title="대형 전체화면으로 크게 보기">
+                <i class="fa-solid fa-expand"></i> 크게보기
+              </button>
+              <button class="btn-chunk-action danger" onclick="deleteAdminDoc('${chunk.id}')" title="이 조문 청크 삭제">
+                <i class="fa-solid fa-trash-can"></i> 삭제
+              </button>
+            </div>
+          </div>
+
+          ${chunk.source ? `<div style="font-size: 13px; color: #94a3b8;"><i class="fa-solid fa-bookmark" style="color: #38bdf8;"></i> <strong>출처:</strong> ${escapeHtml(chunk.source)}</div>` : ''}
+          ${hierarchyHtml}
+
+          <div class="chunk-text-box ${isLong && !isExp ? 'collapsed' : ''}" id="split-chunk-text-${chunk.id}">
+            ${escapeHtml(fullText)}
+          </div>
+
+          ${isLong ? `
+            <button class="btn-toggle-expand-chunk" id="split-chunk-btn-${chunk.id}" onclick="toggleSplitChunkExpand('${chunk.id}')">
+              <i class="fa-solid ${isExp ? 'fa-chevron-up' : 'fa-chevron-down'}"></i> ${isExp ? '본문 접기' : '본문 전체 펼치기'}
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  contentContainer.innerHTML = `
+    <!-- Top Header Bar -->
+    <div class="doc-chunks-header">
+      <div class="doc-chunks-header-top">
+        <div class="doc-chunks-title-group">
+          <div class="doc-chunks-title">
+            <i class="fa-regular fa-file-lines" style="color: #38bdf8;"></i> ${escapeHtml(file.file_name)}
+          </div>
+          <div class="doc-chunks-pills">
+            <span class="doc-item-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 700;"><i class="fa-solid fa-tag"></i> ${escapeHtml(file.category || '기타')}</span>
+            <span class="doc-item-badge"><i class="fa-solid fa-layer-group"></i> 총 ${chunks.length}개 조문 청크</span>
+            <span class="doc-item-badge"><i class="fa-regular fa-hard-drive"></i> 약 ${kbSize} KB</span>
+            <span class="doc-item-badge"><i class="fa-regular fa-clock"></i> ${dateStr}</span>
+            <span class="doc-item-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;"><i class="fa-solid fa-check"></i> bge-m3 임베딩 완료</span>
+          </div>
+        </div>
+        <div class="doc-chunks-actions">
+          <button class="btn-stat-action" onclick="toggleAllSplitChunks('${file.file_id}')" title="모든 조문 본문 일괄 접기 / 펼치기">
+            <i class="fa-solid fa-arrows-up-down"></i> 본문 일괄 접기/펼치기
+          </button>
+          <button class="btn-stat-action" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3);" onclick="deleteAdminFile('${file.file_id}', '${escapeHtml(file.file_name).replace(/'/g, "\\'")}')" title="이 문서의 모든 데이터 일괄 삭제">
+            <i class="fa-solid fa-trash-can"></i> 파일 삭제
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter / Search Row -->
+      <div class="doc-chunks-filter-bar">
+        <div class="doc-chunks-search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="splitChunkSearchInput" placeholder="이 문서 내 조문 번호 / 제목 / 본문 키워드 실시간 검색..." value="${escapeHtml(splitDocState.chunkSearch || '')}" oninput="onSplitChunkSearch(this.value)">
+        </div>
+        <div class="doc-chunks-stats-badge">
+          표시: <strong>${filteredChunks.length}</strong> / ${chunks.length}개 조문
+        </div>
+      </div>
+    </div>
+
+    <!-- Scrollable Chunks Body -->
+    <div class="doc-chunks-scroll-area">
+      ${chunksCardsHtml}
+    </div>
+  `;
+}
+
 // Load Grouped Files List
 async function loadAdminFiles() {
   try {
@@ -630,6 +1085,7 @@ async function loadAdminFiles() {
     if (tabListCount) tabListCount.textContent = `${adminFilesList.length}`;
     
     renderAdminFiles(adminFilesList);
+    renderSplitView();
   } catch (err) {
     console.error('Failed to load admin files:', err);
   }
@@ -679,9 +1135,9 @@ function renderAdminFiles(files) {
             <i class="fa-solid ${iconTag}"></i>
           </div>
           <div class="file-group-info">
-            <div class="file-group-name" title="${file.file_name}">${file.file_name}</div>
+            <div class="file-group-name" title="${escapeHtml(file.file_name)}">${escapeHtml(file.file_name)}</div>
             <div class="file-meta-row">
-              <span class="doc-cat-tag">${file.category || '기타'}</span>
+              <span class="doc-cat-tag">${escapeHtml(file.category || '기타')}</span>
               <span class="file-chunk-badge"><i class="fa-solid fa-layer-group"></i> ${file.chunks_count}개 ${file.file_type === 'EXCEL' ? '법령체인' : '청크'}</span>
               <span class="file-size-tag">약 ${kbSize} KB</span>
               <span class="file-size-tag"><i class="fa-regular fa-clock"></i> ${dateStr}</span>
@@ -691,64 +1147,382 @@ function renderAdminFiles(files) {
         <div class="file-group-right" onclick="event.stopPropagation()">
           <button class="btn-toggle-chunks" onclick="toggleFileDrawer('${file.file_id}')">
             <i class="fa-solid fa-chevron-down toggle-icon-${file.file_id}"></i>
-            <span>${file.file_type === 'EXCEL' ? '법령 체계 목록' : '청크 목록'}</span>
+            <span>${file.file_type === 'EXCEL' ? '법령 체계 목록' : '청크 목록 보기'}</span>
           </button>
-          <button class="btn-del-file" title="이 파일의 모든 데이터 일괄 삭제" onclick="deleteAdminFile('${file.file_id}', '${file.file_name.replace(/'/g, "\\'")}')">
+          <button class="btn-del-file" title="이 파일의 모든 데이터 일괄 삭제" onclick="deleteAdminFile('${file.file_id}', '${escapeHtml(file.file_name).replace(/'/g, "\\'")}')">
             <i class="fa-solid fa-trash-can"></i> 파일 삭제
           </button>
         </div>
       </div>
       <div class="file-chunks-drawer" id="drawer-${file.file_id}" style="display: none;">
-        ${renderDrawerChunks(file.chunks)}
+        <!-- Dynamically rendered by renderFileDrawerContent -->
       </div>
     `;
     adminFilesContainer.appendChild(card);
   });
 }
 
-function renderDrawerChunks(chunks) {
-  if (!chunks || chunks.length === 0) {
-    return '<div style="color: #64748b; font-size: 11px;">상세 청크 데이터가 없습니다.</div>';
+// Track individual chunk expanded state
+const chunkExpandedStates = {}; // chunkId -> boolean
+
+// Render dynamic drawer content with foldable previews, full search, and TOC jump
+function renderFileDrawerContent(fileId) {
+  const drawer = document.getElementById(`drawer-${fileId}`);
+  if (!drawer) return;
+
+  const file = adminFilesList.find(f => f.file_id === fileId);
+  if (!file || !file.chunks || file.chunks.length === 0) {
+    drawer.innerHTML = '<div style="color: #94a3b8; font-size: 13px; padding: 20px; text-align: center;">상세 지식 청크 데이터가 없습니다.</div>';
+    return;
   }
 
-  return chunks.map((c, idx) => {
-    let hierarchyHtml = '';
-    if (c.hierarchy_data) {
-      const hd = c.hierarchy_data;
-      hierarchyHtml = `
-        <div class="hierarchy-breadcrumb-chain">
-          ${hd.primary_law ? `<span class="hierarchy-chip tier-1"><i class="fa-solid fa-scale-balanced"></i> 법률: ${hd.primary_law}</span>` : ''}
-          ${hd.sub_rule ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-2"><i class="fa-solid fa-scroll"></i> 규칙: ${hd.sub_rule}</span>` : ''}
-          ${hd.directive ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-3"><i class="fa-solid fa-book"></i> 예규: ${hd.directive}</span>` : ''}
-          ${hd.precedent ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-4"><i class="fa-solid fa-gavel"></i> 선례: ${hd.precedent}</span>` : ''}
+  const state = getDrawerState(fileId);
+  if (state.allExpanded === undefined) {
+    state.allExpanded = false; // Default to clean compact summary cards so all items can be scanned easily
+  }
+  const searchQ = (state.search || '').toLowerCase().trim();
+
+  // Filter chunks within this file
+  let filtered = file.chunks;
+  if (searchQ) {
+    filtered = file.chunks.filter(c => 
+      (c.title && c.title.toLowerCase().includes(searchQ)) ||
+      (c.content && c.content.toLowerCase().includes(searchQ)) ||
+      (c.source && c.source.toLowerCase().includes(searchQ))
+    );
+  }
+
+  const totalChunks = filtered.length;
+  let currentChunks = filtered;
+  let isAll = state.pageSize === 'all';
+  let pageSize = isAll ? totalChunks : parseInt(state.pageSize, 10);
+  let totalPages = Math.max(1, Math.ceil(totalChunks / pageSize));
+
+  if (!isAll) {
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+    const startIdx = (state.page - 1) * pageSize;
+    const endIdx = Math.min(startIdx + pageSize, totalChunks);
+    currentChunks = filtered.slice(startIdx, endIdx);
+  }
+
+  // Generate TOC options for quick jump
+  const tocOptions = filtered.map((c, i) => {
+    const rawTitle = c.title || `항목 ${i + 1}`;
+    const truncatedTitle = rawTitle.length > 28 ? rawTitle.substring(0, 28) + '...' : rawTitle;
+    return `<option value="${c.id}">[${i + 1}] ${escapeHtml(truncatedTitle)}</option>`;
+  }).join('');
+
+  // 1. Toolbar HTML
+  const paginationControls = isAll ? `
+    <span class="drawer-page-info" style="color: #38bdf8; font-weight: 700;">
+      총 ${totalChunks}개 항목
+    </span>
+  ` : `
+    <div class="drawer-pagination">
+      <button class="drawer-page-btn" onclick="onDrawerPageChange('${fileId}', -1)" ${state.page <= 1 ? 'disabled' : ''}>
+        <i class="fa-solid fa-chevron-left"></i> 이전
+      </button>
+      <span class="drawer-page-info">${state.page} / ${totalPages} (총 ${totalChunks}개)</span>
+      <button class="drawer-page-btn" onclick="onDrawerPageChange('${fileId}', 1)" ${state.page >= totalPages ? 'disabled' : ''}>
+        다음 <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </div>
+  `;
+
+  const toolbarHtml = `
+    <div class="drawer-toolbar">
+      <div class="drawer-toolbar-left">
+        <i class="fa-solid fa-magnifying-glass" style="color: #38bdf8; font-size: 13.5px;"></i>
+        <input type="text" class="drawer-filter-input" placeholder="이 문서 내 조문/본문 실시간 검색..." value="${escapeHtml(state.search)}" oninput="onDrawerSearch('${fileId}', this.value)">
+      </div>
+      <div class="drawer-toolbar-right">
+        <!-- Quick TOC Jump -->
+        <select class="drawer-page-btn" onchange="jumpToChunk(this.value, '${fileId}')" style="max-width: 240px; cursor: pointer;">
+          <option value="">📑 조문 목차 바로가기 (${filtered.length}개)...</option>
+          ${tocOptions}
+        </select>
+
+        <!-- View Mode Selector -->
+        <select class="drawer-page-btn" onchange="onDrawerPageSize('${fileId}', this.value)" style="padding: 6px 12px; cursor: pointer;">
+          <option value="all" ${state.pageSize === 'all' ? 'selected' : ''}>전체 스크롤 보기 (${file.chunks.length}개)</option>
+          <option value="25" ${state.pageSize === 25 ? 'selected' : ''}>25개씩 보기</option>
+          <option value="10" ${state.pageSize === 10 ? 'selected' : ''}>10개씩 보기</option>
+        </select>
+
+        <!-- Toggle All Chunks Expanded / Folded -->
+        <button class="drawer-page-btn" onclick="toggleAllChunksFold('${fileId}')" title="이 문서의 모든 조문 본문을 한번에 펼치거나 접습니다">
+          <i class="fa-solid ${state.allExpanded ? 'fa-compress' : 'fa-expand'}"></i> ${state.allExpanded ? '모두 요약으로 접기' : '모든 본문 펼치기'}
+        </button>
+
+        ${paginationControls}
+      </div>
+    </div>
+  `;
+
+  // 2. Chunks List HTML
+  let chunksListHtml = '';
+  if (currentChunks.length === 0) {
+    chunksListHtml = `<div style="color: #94a3b8; font-size: 13.5px; padding: 32px; text-align: center; background: rgba(15, 23, 42, 0.5); border-radius: 8px;">'${escapeHtml(state.search)}' 검색 결과와 일치하는 조문/청크가 없습니다.</div>`;
+  } else {
+    const baseOffset = isAll ? 0 : (state.page - 1) * pageSize;
+    chunksListHtml = currentChunks.map((c, i) => {
+      const actualIndex = baseOffset + i + 1;
+      
+      let hierarchyHtml = '';
+      if (c.hierarchy_data) {
+        const hd = c.hierarchy_data;
+        hierarchyHtml = `
+          <div class="hierarchy-breadcrumb-chain">
+            ${hd.primary_law ? `<span class="hierarchy-chip tier-1"><i class="fa-solid fa-scale-balanced"></i> 법률: ${escapeHtml(hd.primary_law)}</span>` : ''}
+            ${hd.sub_rule ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-2"><i class="fa-solid fa-scroll"></i> 규칙: ${escapeHtml(hd.sub_rule)}</span>` : ''}
+            ${hd.directive ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-3"><i class="fa-solid fa-book"></i> 예규: ${escapeHtml(hd.directive)}</span>` : ''}
+            ${hd.precedent ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-4"><i class="fa-solid fa-gavel"></i> 선례: ${escapeHtml(hd.precedent)}</span>` : ''}
+          </div>
+        `;
+      }
+
+      const textToShow = c.content || c.preview || '';
+      const isLongText = textToShow.length > 180;
+      
+      // Determine if this card is currently expanded
+      let isCardExpanded = state.allExpanded;
+      if (chunkExpandedStates[c.id] !== undefined) {
+        isCardExpanded = chunkExpandedStates[c.id];
+      }
+
+      const textClass = (isLongText && !isCardExpanded) ? 'drawer-chunk-text collapsed' : 'drawer-chunk-text expanded';
+      const foldBtnHtml = isLongText ? `
+        <button class="btn-toggle-chunk-fold" onclick="toggleChunkCardText('${c.id}', '${fileId}')">
+          <i class="fa-solid ${isCardExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}"></i>
+          <span>${isCardExpanded ? '본문 요약으로 접기' : `본문 더보기 (${textToShow.length}자 전체 펼치기)`}</span>
+        </button>
+      ` : '';
+
+      return `
+        <div class="drawer-chunk-item" id="chunk-card-${c.id}">
+          <div class="drawer-chunk-header">
+            <div class="drawer-chunk-title-group">
+              <span class="drawer-chunk-num-badge">항목 ${actualIndex} / ${file.chunks.length}</span>
+              <span class="drawer-chunk-title">${escapeHtml(c.title || '(제목 없음)')}</span>
+            </div>
+            <div class="drawer-chunk-meta-right">
+              ${c.page_number ? `<span class="drawer-chunk-page"><i class="fa-regular fa-file"></i> 제${c.page_number}페이지</span>` : ''}
+              <span class="drawer-chunk-page">${c.char_length || textToShow.length}자</span>
+              <button class="btn-chunk-action" onclick="copyChunkText('${c.id}')" title="이 청크 본문 클립보드 복사">
+                <i class="fa-regular fa-copy"></i> 복사
+              </button>
+              <button class="btn-chunk-action" onclick="openChunkDetailModal('${c.id}')" title="전체 화면으로 크게 보기">
+                <i class="fa-solid fa-expand"></i> 크게보기
+              </button>
+              <button class="btn-chunk-action danger" onclick="deleteAdminDoc('${c.id}')" title="이 개별 청크 삭제">
+                <i class="fa-solid fa-trash-can"></i> 삭제
+              </button>
+            </div>
+          </div>
+          ${hierarchyHtml}
+          <div class="drawer-chunk-text-wrapper">
+            <div class="${textClass}" id="chunk-text-${c.id}">${escapeHtml(textToShow)}</div>
+            ${foldBtnHtml}
+          </div>
         </div>
       `;
-    }
+    }).join('');
+  }
 
-    return `
-      <div class="drawer-chunk-item">
-        <div class="drawer-chunk-header">
-          <span class="drawer-chunk-title">[항목 ${idx + 1}] ${c.title || ''}</span>
-          <span class="drawer-chunk-page">${c.page_number ? `제${c.page_number}페이지` : ''} (${c.char_length}자)</span>
-        </div>
-        ${hierarchyHtml}
-        <div class="drawer-chunk-text">${c.preview || ''}</div>
-      </div>
-    `;
-  }).join('');
+  drawer.innerHTML = `
+    ${toolbarHtml}
+    <div class="drawer-chunks-list">
+      ${chunksListHtml}
+    </div>
+  `;
 }
 
-// Toggle drawer
+// Toggle individual chunk card text expansion
+window.toggleChunkCardText = function(chunkId, fileId) {
+  const current = chunkExpandedStates[chunkId];
+  const state = getDrawerState(fileId);
+  const isCurrentlyExpanded = (current !== undefined) ? current : state.allExpanded;
+  chunkExpandedStates[chunkId] = !isCurrentlyExpanded;
+
+  const textEl = document.getElementById(`chunk-text-${chunkId}`);
+  const cardEl = document.getElementById(`chunk-card-${chunkId}`);
+  if (textEl && cardEl) {
+    const btn = cardEl.querySelector('.btn-toggle-chunk-fold');
+    if (chunkExpandedStates[chunkId]) {
+      textEl.className = 'drawer-chunk-text expanded';
+      if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> <span>본문 요약으로 접기</span>';
+    } else {
+      textEl.className = 'drawer-chunk-text collapsed';
+      const len = textEl.textContent.length;
+      if (btn) btn.innerHTML = `<i class="fa-solid fa-chevron-down"></i> <span>본문 더보기 (${len}자 전체 펼치기)</span>`;
+    }
+  } else {
+    renderFileDrawerContent(fileId);
+  }
+};
+
+// Toggle all chunks in drawer between expanded and folded
+window.toggleAllChunksFold = function(fileId) {
+  const state = getDrawerState(fileId);
+  state.allExpanded = !state.allExpanded;
+  
+  // Reset individual overrides to match global state
+  const file = adminFilesList.find(f => f.file_id === fileId);
+  if (file && file.chunks) {
+    file.chunks.forEach(c => {
+      chunkExpandedStates[c.id] = state.allExpanded;
+    });
+  }
+  
+  renderFileDrawerContent(fileId);
+};
+
+// Jump directly to a chunk item from TOC
+window.jumpToChunk = function(chunkId, fileId) {
+  if (!chunkId) return;
+  const target = document.getElementById(`chunk-card-${chunkId}`);
+  if (target) {
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    target.classList.remove('chunk-card-highlight');
+    void target.offsetWidth; // Trigger reflow for restart animation
+    target.classList.add('chunk-card-highlight');
+  }
+};
+
+// Drawer Action Handlers
+window.onDrawerSearch = function(fileId, value) {
+  const state = getDrawerState(fileId);
+  state.search = value;
+  state.page = 1;
+  renderFileDrawerContent(fileId);
+};
+
+window.onDrawerPageSize = function(fileId, size) {
+  const state = getDrawerState(fileId);
+  state.pageSize = size === 'all' ? 'all' : parseInt(size, 10);
+  state.page = 1;
+  renderFileDrawerContent(fileId);
+};
+
+window.onDrawerPageChange = function(fileId, delta) {
+  const state = getDrawerState(fileId);
+  state.page += delta;
+  renderFileDrawerContent(fileId);
+};
+
+// Toggle drawer open/close
 window.toggleFileDrawer = function(fileId) {
   const drawer = document.getElementById(`drawer-${fileId}`);
   const icon = document.querySelector(`.toggle-icon-${fileId}`);
   if (!drawer) return;
 
-  const isOpen = drawer.style.display !== 'none';
-  drawer.style.display = isOpen ? 'none' : 'flex';
-  if (icon) {
-    icon.className = isOpen ? `fa-solid fa-chevron-down toggle-icon-${fileId}` : `fa-solid fa-chevron-up toggle-icon-${fileId}`;
+  const isCurrentlyOpen = drawer.style.display !== 'none';
+  if (isCurrentlyOpen) {
+    drawer.style.display = 'none';
+    if (icon) icon.className = `fa-solid fa-chevron-down toggle-icon-${fileId}`;
+  } else {
+    drawer.style.display = 'flex';
+    if (icon) icon.className = `fa-solid fa-chevron-up toggle-icon-${fileId}`;
+    renderFileDrawerContent(fileId);
   }
+};
+
+// Copy Chunk Text Helper
+window.copyChunkText = function(chunkId) {
+  let foundChunk = null;
+  for (const f of adminFilesList) {
+    if (f.chunks) {
+      foundChunk = f.chunks.find(c => c.id === chunkId);
+      if (foundChunk) break;
+    }
+  }
+  if (!foundChunk) {
+    foundChunk = adminDocsList.find(d => d.id === chunkId);
+  }
+
+  const textToCopy = foundChunk ? (foundChunk.content || foundChunk.preview || '') : '';
+  if (textToCopy) {
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      alert('청크 본문이 클립보드에 복사되었습니다.');
+    }).catch(() => {
+      prompt('클립보드 복사:', textToCopy);
+    });
+  }
+};
+
+// Open Chunk Detail Modal
+window.openChunkDetailModal = function(chunkId) {
+  let foundChunk = null;
+  for (const f of adminFilesList) {
+    if (f.chunks) {
+      foundChunk = f.chunks.find(c => c.id === chunkId);
+      if (foundChunk) break;
+    }
+  }
+  if (!foundChunk) {
+    foundChunk = adminDocsList.find(d => d.id === chunkId);
+  }
+
+  if (!foundChunk) return;
+
+  const modal = document.getElementById("chunkDetailModal");
+  const modalCat = document.getElementById("modalChunkCategory");
+  const modalSrc = document.getElementById("modalChunkSource");
+  const modalPage = document.getElementById("modalChunkPage");
+  const modalLen = document.getElementById("modalChunkLength");
+  const modalTitle = document.getElementById("modalChunkTitle");
+  const modalHier = document.getElementById("modalChunkHierarchy");
+  const modalContent = document.getElementById("modalChunkContent");
+
+  if (modalCat) modalCat.textContent = foundChunk.category || '일반';
+  if (modalSrc) modalSrc.innerHTML = `<i class="fa-solid fa-bookmark"></i> ${escapeHtml(foundChunk.source || '')}`;
+  if (modalPage) {
+    modalPage.style.display = foundChunk.page_number ? 'inline-flex' : 'none';
+    modalPage.innerHTML = `<i class="fa-regular fa-file-lines"></i> 제${foundChunk.page_number}페이지`;
+  }
+  const fullText = foundChunk.content || foundChunk.preview || '';
+  if (modalLen) modalLen.innerHTML = `<i class="fa-solid fa-font"></i> ${fullText.length}자`;
+  if (modalTitle) modalTitle.textContent = foundChunk.title || '(제목 없음)';
+  if (modalContent) modalContent.textContent = fullText;
+
+  if (modalHier) {
+    if (foundChunk.hierarchy_data) {
+      const hd = foundChunk.hierarchy_data;
+      modalHier.style.display = 'block';
+      modalHier.innerHTML = `
+        <div class="hierarchy-breadcrumb-chain">
+          ${hd.primary_law ? `<span class="hierarchy-chip tier-1"><i class="fa-solid fa-scale-balanced"></i> 법률: ${escapeHtml(hd.primary_law)}</span>` : ''}
+          ${hd.sub_rule ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-2"><i class="fa-solid fa-scroll"></i> 규칙: ${escapeHtml(hd.sub_rule)}</span>` : ''}
+          ${hd.directive ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-3"><i class="fa-solid fa-book"></i> 예규: ${escapeHtml(hd.directive)}</span>` : ''}
+          ${hd.precedent ? `<span class="hierarchy-arrow">➔</span><span class="hierarchy-chip tier-4"><i class="fa-solid fa-gavel"></i> 선례: ${escapeHtml(hd.precedent)}</span>` : ''}
+        </div>
+      `;
+    } else {
+      modalHier.style.display = 'none';
+    }
+  }
+
+  // Copy button in modal
+  const btnCopy = document.getElementById("btnCopyChunkModal");
+  if (btnCopy) {
+    btnCopy.onclick = () => {
+      navigator.clipboard.writeText(fullText).then(() => {
+        alert('청크 본문이 클립보드에 복사되었습니다.');
+      });
+    };
+  }
+
+  // Close handlers
+  const btnClose = document.getElementById("btnCloseChunkModal");
+  const btnCloseBottom = document.getElementById("btnCloseChunkModalBtn");
+  const closeModal = () => { if (modal) modal.style.display = 'none'; };
+  if (btnClose) btnClose.onclick = closeModal;
+  if (btnCloseBottom) btnCloseBottom.onclick = closeModal;
+
+  if (modal) modal.style.display = 'flex';
 };
 
 // Delete Entire File Group
@@ -761,8 +1535,8 @@ window.deleteAdminFile = async function(fileId, fileName) {
     const data = await res.json();
     if (res.ok && data.success) {
       alert(`'${fileName}' 및 포함된 ${data.deleted_chunks}개의 지식 청크가 모두 삭제되었습니다.`);
-      loadAdminFiles();
-      loadAdminDocuments();
+      await loadAdminFiles();
+      await loadAdminDocuments();
     } else {
       alert(`삭제 실패: ${data.detail || '오류 발생'}`);
     }
@@ -779,6 +1553,7 @@ async function loadAdminDocuments() {
     const data = await res.json();
     adminDocsList = data.documents || [];
     renderAdminDocTable(adminDocsList);
+    renderSplitView();
   } catch (err) {
     console.error('Failed to load admin docs:', err);
   }
@@ -794,17 +1569,22 @@ function renderAdminDocTable(docs) {
 
   docs.forEach((d) => {
     const tr = document.createElement('tr');
-    const preview = d.content ? (d.content.length > 70 ? d.content.substring(0, 70) + '...' : d.content) : '';
+    const preview = d.content ? (d.content.length > 85 ? d.content.substring(0, 85) + '...' : d.content) : '';
     
     tr.innerHTML = `
       <td><span class="doc-cat-tag">${escapeHtml(d.category || '기타')}</span></td>
-      <td><strong class="doc-title-text">${escapeHtml(d.title || '')}</strong></td>
+      <td><strong class="doc-title-text" style="cursor: pointer; color: #38bdf8;" onclick="openChunkDetailModal('${d.id}')" title="클릭하여 원문 보기">${escapeHtml(d.title || '')}</strong></td>
       <td class="doc-source-text">${escapeHtml(d.source || '')}</td>
       <td class="doc-preview-text">${escapeHtml(preview)}</td>
       <td>
-        <button class="btn-del-doc" title="청크 삭제" onclick="deleteAdminDoc('${d.id}')">
-          <i class="fa-solid fa-trash-can"></i>
-        </button>
+        <div style="display: flex; gap: 4px;">
+          <button class="btn-chunk-action" title="원문 크게보기" onclick="openChunkDetailModal('${d.id}')">
+            <i class="fa-solid fa-expand"></i>
+          </button>
+          <button class="btn-del-doc" title="청크 삭제" onclick="deleteAdminDoc('${d.id}')">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
       </td>
     `;
     adminDocTableBody.appendChild(tr);
@@ -820,8 +1600,8 @@ window.deleteAdminDoc = async function(docId) {
     });
     const data = await res.json();
     if (res.ok && data.success) {
-      loadAdminFiles();
-      loadAdminDocuments();
+      await loadAdminFiles();
+      await loadAdminDocuments();
     } else {
       alert(`삭제 실패: ${data.detail || '오류 발생'}`);
     }
