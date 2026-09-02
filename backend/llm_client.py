@@ -126,7 +126,7 @@ async def stream_chat_completion(
                     cat = doc.get("category", "일반")
                     src = doc.get("source", "법원 실무자료")
                     title = doc.get("title", "")
-                    content = doc.get("content", "")
+                    content = doc.get("expanded_content") or doc.get("content", "")
                     hierarchy = doc.get("hierarchy_data")
                     
                     hier_info = ""

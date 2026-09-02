@@ -108,8 +108,18 @@ async def check_input_security(req: CheckInputRequest):
 
 @app.get("/api/security/stats")
 async def get_security_statistics():
-    """개인정보 마스킹 및 유해 입력 차단 실시간 통계 API"""
-    return input_filter.get_stats()
+    """개인정보 마스킹 및 유해 입력 차단 실시간 종합 통계 API"""
+    sec_stats = input_filter.get_stats()
+    pii_in_logs = sum(1 for l in query_logger.logs if l.get("has_pii", False))
+    total_pii = max(sec_stats.get("pii_masked_count", 0), pii_in_logs)
+    total_checked = max(sec_stats.get("total_checked", 0), len(query_logger.logs))
+    return {
+        "total_checked": total_checked,
+        "pii_masked_count": total_pii,
+        "inappropriate_blocked_count": sec_stats.get("inappropriate_blocked_count", 0),
+        "pii_type_counts": sec_stats.get("pii_type_counts", {}),
+        "last_incident_time": sec_stats.get("last_incident_time")
+    }
 
 def load_kb_data():
     kb_path = DATA_DIR / "family_reg_officials_kb.json"
@@ -247,13 +257,38 @@ async def get_rag_stats():
 
 @app.get("/api/metrics/stats")
 async def get_metrics_stats():
-    """지연시간, 토큰 소비량 및 질의 캐시 적중률 통계"""
+    """지연시간, 토큰 소비량, 질의 통계 및 캐시 적중률 종합 통계"""
     cache_stats = cache_manager.get_stats()
     metric_summary = metrics_collector.get_summary()
+    logger_stats = query_logger.get_stats_summary()
+    
+    total_calls = logger_stats["total_logs"]
+    avg_lat = logger_stats["avg_latency_ms"] if total_calls > 0 else metric_summary.get("avg_latency_ms", 0.0)
+    total_tok = logger_stats["total_tokens"] if total_calls > 0 else metric_summary.get("total_tokens_consumed", 0)
+
     return {
+        "total_calls": total_calls,
+        "today_calls": logger_stats["today_logs"],
+        "rag_ratio_pct": logger_stats["rag_ratio_pct"],
+        "avg_latency_ms": avg_lat,
+        "avg_latency_sec": round(avg_lat / 1000, 2),
+        "total_tokens": total_tok,
+        "estimated_daily_cost": logger_stats["estimated_cost_usd"],
+        "model_breakdown": logger_stats["model_breakdown"],
         "cache": cache_stats,
-        "metrics": metric_summary
+        "metrics": metric_summary,
+        "logger": logger_stats
     }
+
+@app.post("/api/metrics/reset")
+async def reset_metrics_stats(token: str = Depends(verify_admin_token)):
+    """실시간 수집 메트릭 초기화"""
+    metrics_collector.history = []
+    metrics_collector.model_stats = {
+        "llama-3.3-70b": {"requests": 0, "total_tokens": 0, "total_latency_ms": 0},
+        "gpt-oss-120b": {"requests": 0, "total_tokens": 0, "total_latency_ms": 0}
+    }
+    return {"success": True, "message": "모니터링 통계 지표가 초기화되었습니다."}
 
 @app.post("/api/cache/clear")
 async def clear_query_cache():
@@ -452,6 +487,25 @@ async def export_admin_query_logs(token: str = Depends(verify_admin_token)):
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename=family_reg_query_logs_{int(time.time())}.json"}
     )
+
+@app.post("/api/admin/logs/import")
+async def import_admin_query_logs(
+    file: UploadFile = File(...),
+    merge: bool = True,
+    token: str = Depends(verify_admin_token)
+):
+    """백업 JSON 파일로부터 질의 이력 가져오기/복원"""
+    try:
+        content = await file.read()
+        data = json.loads(content.decode("utf-8"))
+        if not isinstance(data, list):
+            raise HTTPException(status_code=400, detail="유효한 JSON 배열 형식이 아닙니다.")
+        added = query_logger.import_logs(data, merge=merge)
+        return {"success": True, "message": f"{added}건의 질의 감사 이력이 성공적으로 복원되었습니다.", "imported_count": added, "total": len(query_logger.logs)}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="JSON 파일 파싱에 실패하였습니다.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로그 가져오기 실패: {str(e)}")
 
 @app.delete("/api/admin/logs")
 async def clear_admin_query_logs(token: str = Depends(verify_admin_token)):

@@ -66,13 +66,45 @@ class RAGService:
                 await asyncio.sleep(1.0)
         return [0.0] * 1024
 
+    def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
+        """단순 텍스트뿐만 아니라 조문, 섹션 헤딩, 이웃 맥락 힌트를 포함한 풍부한 임베딩 텍스트 구성"""
+        category = doc.get('category', '')
+        title = doc.get('title', '')
+        source = doc.get('source', '')
+        content = doc.get('content', '')
+        
+        parts = [f"[{category}] {title}"]
+        
+        sec = doc.get('section_heading')
+        if sec:
+            parts.append(f"주제: {sec}")
+            
+        arts = doc.get('detected_articles')
+        if arts and isinstance(arts, list) and len(arts) > 0:
+            parts.append(f"관련조문: {', '.join(arts)}")
+            
+        parts.append(f"출처: {source}")
+        
+        # 이전/다음 청크 힌트가 있으면 임베딩에 약한 맥락 반영
+        prev_hint = doc.get('prev_chunk_preview')
+        next_hint = doc.get('next_chunk_preview')
+        
+        body = content
+        if prev_hint:
+            body = f"...(이전문맥: {prev_hint})\n{body}"
+        if next_hint:
+            body = f"{body}\n...(후속문맥: {next_hint})..."
+            
+        parts.append(body)
+        return "\n".join(parts)
+
     async def _generate_and_save_corpus_embeddings(self):
         """전체 지식 코퍼스에 대해 bge-m3 임베딩 생성 후 로컬 저장"""
         print(f"[RAG] Generating embeddings for {len(self.corpus)} documents using {EMBEDDING_MODEL}...")
         vectors = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             for doc in self.corpus:
-                text_to_embed = f"[{doc.get('category', '')}] {doc.get('title', '')}\n{doc.get('source', '')}\n{doc.get('content', '')}"
+                text_to_embed = self._build_embedding_text(doc)
                 emb = await self._embed_single_text_with_retry(client, text_to_embed)
                 vectors.append(emb)
 
@@ -94,7 +126,7 @@ class RAGService:
         new_vectors = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             for doc in new_docs:
-                text_to_embed = f"[{doc.get('category', '')}] {doc.get('title', '')}\n{doc.get('source', '')}\n{doc.get('content', '')}"
+                text_to_embed = self._build_embedding_text(doc)
                 emb = await self._embed_single_text_with_retry(client, text_to_embed)
                 new_vectors.append(emb)
 
@@ -420,13 +452,46 @@ class RAGService:
             except Exception as e:
                 print(f"[RAG] Rerank exception: {e}")
 
-        # Fallback to dense search ranking
-        return candidates[:top_k]
+    def _find_sibling_chunk(self, group_id: str, chunk_index: int) -> Optional[Dict[str, Any]]:
+        """동일 문서 그룹 내의 인접(이전/다음) 청크 탐색"""
+        if not group_id or chunk_index < 1:
+            return None
+        for doc in self.corpus:
+            if doc.get("group_id") == group_id and doc.get("chunk_index") == chunk_index:
+                return doc
+        return None
 
     async def retrieve(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
-        """2단계 통합 검색 (임베딩 검색 -> 리랭킹)"""
+        """2단계 통합 검색 (임베딩 검색 -> 리랭킹) 및 이웃 맥락 자동 확장(Parent-Child Context Extension)"""
         dense_candidates = await self.dense_search(query, top_k=8)
         reranked_docs = await self.rerank(query, dense_candidates, top_k=top_k)
+
+        # 각 검색 결과에 대해 동일 문서 내 이웃 맥락(전후 문맥) 자동 결합
+        for doc in reranked_docs:
+            group_id = doc.get("group_id")
+            chunk_idx = doc.get("chunk_index")
+
+            if group_id and isinstance(chunk_idx, int) and chunk_idx >= 1:
+                prev_chunk = self._find_sibling_chunk(group_id, chunk_idx - 1)
+                next_chunk = self._find_sibling_chunk(group_id, chunk_idx + 1)
+
+                expanded_parts = []
+                if prev_chunk:
+                    prev_text = prev_chunk.get("content", "").strip()
+                    if prev_text:
+                        expanded_parts.append(f"[이전 연결 문맥]\n... {prev_text[-160:]}")
+
+                expanded_parts.append(f"[핵심 발췌 본문]\n{doc.get('content', '')}")
+
+                if next_chunk:
+                    next_text = next_chunk.get("content", "").strip()
+                    if next_text:
+                        expanded_parts.append(f"[후속 연결 문맥]\n{next_text[:160]} ...")
+
+                doc["expanded_content"] = "\n\n".join(expanded_parts)
+            else:
+                doc["expanded_content"] = doc.get("content", "")
+
         return reranked_docs
 
     async def execute_web_agent(self, query: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:

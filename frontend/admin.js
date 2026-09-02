@@ -17,13 +17,14 @@ const btnLogout = document.getElementById("btnLogout");
 const themeToggleBtn = document.getElementById("themeToggleBtn");
 
 // Dashboard Elements
-const adminDocCount = document.getElementById("adminDocCount");
+const statTotalChunks = document.getElementById("statTotalChunks");
+const docsTotalBadge = document.getElementById("docsTotalBadge");
 const tabListCount = document.getElementById("tabListCount");
 const tabFilesCount = document.getElementById("tabFilesCount");
 const tabChunksCount = document.getElementById("tabChunksCount");
-const reindexAllBtn = document.getElementById("reindexAllBtn");
-const resetDefaultBtn = document.getElementById("resetDefaultBtn");
-const clearAllDocsBtn = document.getElementById("clearAllDocsBtn");
+const btnRefreshAdmin = document.getElementById("btnRefreshAdmin");
+const btnResetDefault = document.getElementById("btnResetDefault");
+const btnClearAll = document.getElementById("btnClearAll");
 const modalTabs = document.querySelectorAll(".modal-tab");
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("fileInput");
@@ -36,21 +37,29 @@ const viewModeChunksBtn = document.getElementById("viewModeChunksBtn");
 const adminFilesContainer = document.getElementById("adminFilesContainer");
 const adminChunksContainer = document.getElementById("adminChunksContainer");
 
-// Metrics Elements
+// Metrics Elements (Tab 4)
+const metricTotalCalls = document.getElementById("metricTotalCalls");
+const metricTodayCalls = document.getElementById("metricTodayCalls");
+const metricRagRatio = document.getElementById("metricRagRatio");
+const metricRagSub = document.getElementById("metricRagSub");
+const metricTotalTokens = document.getElementById("metricTotalTokens");
+const metricDailyCost = document.getElementById("metricDailyCost");
+const metricAvgLatency = document.getElementById("metricAvgLatency");
+const metricAvgLatencySub = document.getElementById("metricAvgLatencySub");
 const metricHitRate = document.getElementById("metricHitRate");
 const metricHitSub = document.getElementById("metricHitSub");
 const metricSavedTokens = document.getElementById("metricSavedTokens");
-const metricAvgLatency = document.getElementById("metricAvgLatency");
 const metricCachedCount = document.getElementById("metricCachedCount");
 const refreshMetricsBtn = document.getElementById("refreshMetricsBtn");
+const resetMetricsBtn = document.getElementById("resetMetricsBtn");
 const clearCacheBtn = document.getElementById("clearCacheBtn");
 
-// Security Elements
+// Security Elements (Tab 5)
 const refreshSecurityBtn = document.getElementById("refreshSecurityBtn");
+const metricTotalChecked = document.getElementById("metricTotalChecked");
 const metricPiiMasked = document.getElementById("metricPiiMasked");
 const metricAbuseBlocked = document.getElementById("metricAbuseBlocked");
 const metricRrnMasked = document.getElementById("metricRrnMasked");
-const metricPhoneMasked = document.getElementById("metricPhoneMasked");
 
 // Helper: Authenticated fetch wrapper
 async function authFetch(url, options = {}) {
@@ -442,10 +451,90 @@ function setupDashboardEvents() {
     });
   }
 
+  // Top Action Buttons
+  if (btnRefreshAdmin) {
+    btnRefreshAdmin.addEventListener('click', () => {
+      loadAdminFiles();
+      loadAdminDocuments();
+      loadMetricsStats();
+      loadSecurityStats();
+      loadQueryLogs(1, currentLogSearch);
+    });
+  }
+
+  if (btnClearAll) {
+    btnClearAll.addEventListener('click', async () => {
+      const confirmText = prompt('등록된 모든 RAG 지식 문서와 임베딩 인덱스를 완전히 삭제하시겠습니까?\n삭제를 진행하려면 "전체삭제"를 입력하세요:');
+      if (confirmText !== '전체삭제') {
+        if (confirmText !== null) alert('입력 내용이 일치하지 않아 삭제가 취소되었습니다.');
+        return;
+      }
+
+      btnClearAll.disabled = true;
+      btnClearAll.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 삭제 중...';
+      try {
+        const res = await authFetch('/api/admin/documents', { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert('모든 RAG 지식 문서 및 임베딩 인덱스가 완전히 삭제되었습니다.');
+          loadAdminFiles();
+          loadAdminDocuments();
+        } else {
+          alert(`삭제 실패: ${data.detail || '오류 발생'}`);
+        }
+      } catch (err) {
+        alert(`오류: ${err.message}`);
+      } finally {
+        btnClearAll.disabled = false;
+        btnClearAll.innerHTML = '<i class="fa-solid fa-trash-can"></i> 전체 비우기';
+      }
+    });
+  }
+
+  if (btnResetDefault) {
+    btnResetDefault.addEventListener('click', async () => {
+      if (!confirm('초기 기본 가족관계등록 법령/선례 지식 데이터로 복원하고 bge-m3 재임베딩을 진행하시겠습니까?')) return;
+      btnResetDefault.disabled = true;
+      btnResetDefault.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 복원 중...';
+      try {
+        const res = await authFetch('/api/admin/reset-default', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`기본 지식 코퍼스(${data.total_docs}건)로 성공적으로 복원 및 재임베딩되었습니다.`);
+          loadAdminFiles();
+          loadAdminDocuments();
+        } else {
+          alert(`복원 실패: ${data.detail || '오류 발생'}`);
+        }
+      } catch (err) {
+        alert(`복원 실패: ${err.message}`);
+      } finally {
+        btnResetDefault.disabled = false;
+        btnResetDefault.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 기본 코퍼스 복원';
+      }
+    });
+  }
+
   // Metrics handlers
   if (refreshMetricsBtn) {
     refreshMetricsBtn.addEventListener('click', loadMetricsStats);
   }
+
+  if (resetMetricsBtn) {
+    resetMetricsBtn.addEventListener('click', async () => {
+      if (!confirm('실시간 성능 지표를 초기화하시겠습니까?')) return;
+      try {
+        const res = await authFetch('/api/metrics/reset', { method: 'POST' });
+        if (res.ok) {
+          alert('통계 지표가 초기화되었습니다.');
+          loadMetricsStats();
+        }
+      } catch (err) {
+        alert(`오류: ${err.message}`);
+      }
+    });
+  }
+
   if (clearCacheBtn) {
     clearCacheBtn.addEventListener('click', async () => {
       if (!confirm('저장된 모든 질의응답 캐시를 초기화하시겠습니까?')) return;
@@ -729,11 +818,23 @@ async function loadMetricsStats() {
     if (!res.ok) return;
     const data = await res.json();
     
-    if (metricHitRate) metricHitRate.textContent = `${data.cache.hit_rate_pct}%`;
-    if (metricHitSub) metricHitSub.textContent = `${data.cache.cache_hits}건 적중 / ${data.cache.total_queries}건 전체`;
-    if (metricSavedTokens) metricSavedTokens.textContent = `${data.cache.total_saved_tokens.toLocaleString()} 토큰`;
-    if (metricAvgLatency) metricAvgLatency.textContent = `${data.metrics.avg_latency_ms} ms`;
-    if (metricCachedCount) metricCachedCount.textContent = `${data.cache.cached_entries}건`;
+    // 1. Overall Call Stats
+    if (metricTotalCalls) metricTotalCalls.textContent = `${(data.total_calls || 0).toLocaleString()}건`;
+    if (metricTodayCalls) metricTodayCalls.textContent = `오늘: ${(data.today_calls || 0).toLocaleString()}건 인입`;
+    if (metricRagRatio) metricRagRatio.textContent = `${data.rag_ratio_pct || 0}%`;
+    if (metricRagSub) metricRagSub.textContent = `지식 참조 응답: ${(data.logger?.rag_count || 0).toLocaleString()}건`;
+    if (metricTotalTokens) metricTotalTokens.textContent = `${(data.total_tokens || 0).toLocaleString()} tk`;
+    if (metricDailyCost) metricDailyCost.textContent = `예상 비용: ${data.estimated_daily_cost || '$0.00'}`;
+    if (metricAvgLatency) metricAvgLatency.textContent = `${data.avg_latency_sec || 0}초 (${data.avg_latency_ms || 0}ms)`;
+    if (metricAvgLatencySub) metricAvgLatencySub.textContent = `실시간 스트리밍 처리 (최신 ${data.metrics?.recent_latency_ms || 0}ms)`;
+
+    // 2. Cache Metrics
+    if (data.cache) {
+      if (metricHitRate) metricHitRate.textContent = `${data.cache.hit_rate_pct || 0}%`;
+      if (metricHitSub) metricHitSub.textContent = `${data.cache.cache_hits || 0}건 적중 / ${data.cache.total_queries || 0}건 전체`;
+      if (metricSavedTokens) metricSavedTokens.textContent = `${(data.cache.total_saved_tokens || 0).toLocaleString()} 토큰`;
+      if (metricCachedCount) metricCachedCount.textContent = `보관된 캐시: ${data.cache.cached_entries || 0}건 (절감: ${data.cache.total_saved_time_sec || 0}초)`;
+    }
   } catch (err) {
     console.error('Failed to load metrics:', err);
   }
@@ -746,13 +847,26 @@ async function loadSecurityStats() {
     if (!res.ok) return;
     const data = await res.json();
     
-    if (metricPiiMasked) metricPiiMasked.textContent = `${data.pii_masked_count || 0}건`;
-    if (metricAbuseBlocked) metricAbuseBlocked.textContent = `${data.inappropriate_blocked_count || 0}건`;
-    if (metricRrnMasked) metricRrnMasked.textContent = `${data.pii_type_counts?.rrn || 0}건`;
-    if (metricPhoneMasked) metricPhoneMasked.textContent = `${data.pii_type_counts?.phone || 0}건`;
+    if (metricTotalChecked) metricTotalChecked.textContent = `${(data.total_checked || 0).toLocaleString()}건`;
+    if (metricPiiMasked) metricPiiMasked.textContent = `${(data.pii_masked_count || 0).toLocaleString()}건`;
+    if (metricAbuseBlocked) metricAbuseBlocked.textContent = `${(data.inappropriate_blocked_count || 0).toLocaleString()}건`;
+    if (metricRrnMasked) metricRrnMasked.textContent = `${(data.pii_type_counts?.rrn || 0).toLocaleString()}건`;
   } catch (err) {
     console.error('Failed to load security stats:', err);
   }
+}
+
+// Helper: Format log date and time accurately
+function formatLogDateTime(log) {
+  if (!log) return '-';
+  if (log.timestamp) {
+    const d = new Date(log.timestamp * 1000);
+    if (!isNaN(d.getTime())) {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+  }
+  return log.datetime_str || '-';
 }
 
 // ==========================================
@@ -772,6 +886,8 @@ const logStatRagRatio = document.getElementById("logStatRagRatio");
 const logStatPiiCount = document.getElementById("logStatPiiCount");
 const logSearchInput = document.getElementById("logSearchInput");
 const btnRefreshLogs = document.getElementById("btnRefreshLogs");
+const btnImportLogs = document.getElementById("btnImportLogs");
+const logImportFileInput = document.getElementById("logImportFileInput");
 const btnExportLogs = document.getElementById("btnExportLogs");
 const btnClearLogs = document.getElementById("btnClearLogs");
 const adminLogsTableBody = document.getElementById("adminLogsTableBody");
@@ -813,11 +929,11 @@ async function loadQueryLogs(page = 1, search = "") {
 
     // Update Summary Stats
     if (data.stats) {
-      if (tabLogsCount) tabLogsCount.textContent = `${data.stats.total_logs || 0}`;
-      if (logStatTotal) logStatTotal.textContent = `${data.stats.total_logs || 0}건`;
-      if (logStatToday) logStatToday.textContent = `${data.stats.today_logs || 0}건`;
+      if (tabLogsCount) tabLogsCount.textContent = `${(data.stats.total_logs || 0).toLocaleString()}`;
+      if (logStatTotal) logStatTotal.textContent = `${(data.stats.total_logs || 0).toLocaleString()}건`;
+      if (logStatToday) logStatToday.textContent = `${(data.stats.today_logs || 0).toLocaleString()}건`;
       if (logStatRagRatio) logStatRagRatio.textContent = `${data.stats.rag_ratio_pct || 0}%`;
-      if (logStatPiiCount) logStatPiiCount.textContent = `${data.stats.pii_detected_count || 0}건`;
+      if (logStatPiiCount) logStatPiiCount.textContent = `${(data.stats.pii_detected_count || 0).toLocaleString()}건`;
     }
 
     totalLogPages = data.total_pages || 1;
@@ -859,7 +975,7 @@ function renderQueryLogsTable(logs) {
     const respShort = log.assistant_response ? (log.assistant_response.length > 75 ? log.assistant_response.substring(0, 75) + '...' : log.assistant_response) : '(답변 없음)';
 
     tr.innerHTML = `
-      <td class="log-col-time"><i class="fa-regular fa-clock"></i> ${escapeHtml(log.datetime_str || '')}</td>
+      <td class="log-col-time"><i class="fa-regular fa-clock"></i> ${escapeHtml(formatLogDateTime(log))}</td>
       <td class="log-col-query">
         ${escapeHtml(queryShort)} ${piiTag}
       </td>
@@ -899,7 +1015,7 @@ window.openLogDetailModal = async function(logId) {
     currentDetailLog = log;
 
     if (detailLogId) detailLogId.innerHTML = `<i class="fa-solid fa-hashtag"></i> ${log.id}`;
-    if (detailLogTime) detailLogTime.innerHTML = `<i class="fa-regular fa-clock"></i> ${log.datetime_str}`;
+    if (detailLogTime) detailLogTime.innerHTML = `<i class="fa-regular fa-clock"></i> ${escapeHtml(formatLogDateTime(log))}`;
     if (detailLogModel) detailLogModel.innerHTML = `<i class="fa-solid fa-microchip"></i> ${log.model} ${log.cached ? '(캐시적중)' : ''}`;
     if (detailLogLatency) detailLogLatency.innerHTML = `<i class="fa-solid fa-stopwatch"></i> ${log.latency_ms} ms`;
     if (detailLogTokens) detailLogTokens.innerHTML = `<i class="fa-solid fa-coins"></i> ${log.tokens} 토큰`;
@@ -1060,6 +1176,44 @@ if (btnExportLogs) {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       alert(`이력 다운로드 오류: ${err.message}`);
+    }
+  });
+}
+
+// Import Logs handler
+if (btnImportLogs && logImportFileInput) {
+  btnImportLogs.addEventListener('click', () => {
+    logImportFileInput.value = '';
+    logImportFileInput.click();
+  });
+
+  logImportFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    btnImportLogs.disabled = true;
+    btnImportLogs.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 복원 중...';
+
+    try {
+      const res = await authFetch('/api/admin/logs/import?merge=true', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`✅ ${data.message}`);
+        loadQueryLogs(1, '');
+      } else {
+        alert(`❌ 가져오기 실패: ${data.detail || '오류가 발생했습니다.'}`);
+      }
+    } catch (err) {
+      alert(`오류: ${err.message}`);
+    } finally {
+      btnImportLogs.disabled = false;
+      btnImportLogs.innerHTML = '<i class="fa-solid fa-file-import"></i> JSON 불러오기';
     }
   });
 }

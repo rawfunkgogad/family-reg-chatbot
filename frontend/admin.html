@@ -1642,13 +1642,13 @@
 
       <!-- Tab 4: Cost & Latency Metrics Monitoring -->
       <div class="tab-pane" id="tab-metrics">
-        <div class="metrics-grid">
+        <div class="metrics-grid" style="margin-bottom: 16px;">
           <div class="metric-card">
             <div class="metric-icon" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;"><i class="fa-solid fa-calculator"></i></div>
             <div class="metric-info">
               <span class="metric-label">총 누적 질의 건수</span>
               <strong class="metric-val" id="metricTotalCalls">0건</strong>
-              <span class="metric-sub">실시간 처리 완료 질의</span>
+              <span class="metric-sub" id="metricTodayCalls">오늘: 0건 인입</span>
             </div>
           </div>
 
@@ -1657,16 +1657,16 @@
             <div class="metric-info">
               <span class="metric-label">RAG 지식 검색율</span>
               <strong class="metric-val" id="metricRagRatio">0.0%</strong>
-              <span class="metric-sub">가족관계 실무 지식 참조율</span>
+              <span class="metric-sub" id="metricRagSub">가족관계 실무 지식 참조율</span>
             </div>
           </div>
 
           <div class="metric-card">
             <div class="metric-icon" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;"><i class="fa-solid fa-coins"></i></div>
             <div class="metric-info">
-              <span class="metric-label">일일 예상 토큰 비용</span>
-              <strong class="metric-val" id="metricDailyCost">$0.00</strong>
-              <span class="metric-sub">Groq/Llama-3.3 최적화 적용</span>
+              <span class="metric-label">총 토큰 / 예상 비용</span>
+              <strong class="metric-val" id="metricTotalTokens">0 tk</strong>
+              <span class="metric-sub" id="metricDailyCost">예상 비용: $0.00</span>
             </div>
           </div>
 
@@ -1675,7 +1675,25 @@
             <div class="metric-info">
               <span class="metric-label">평균 응답 지연 시간</span>
               <strong class="metric-val" id="metricAvgLatency">0.00초</strong>
-              <span class="metric-sub">bge-m3 + Groq 스트리밍</span>
+              <span class="metric-sub" id="metricAvgLatencySub">실시간 스트리밍 처리</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(16, 185, 129, 0.2); color: #34d399;"><i class="fa-solid fa-bolt"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">고속 캐시 적중률</span>
+              <strong class="metric-val" id="metricHitRate">0.0%</strong>
+              <span class="metric-sub" id="metricHitSub">0건 적중 / 0건 전체</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa;"><i class="fa-solid fa-piggy-bank"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">캐시 절감 토큰</span>
+              <strong class="metric-val" id="metricSavedTokens">0 토큰</strong>
+              <span class="metric-sub" id="metricCachedCount">보관된 캐시: 0건</span>
             </div>
           </div>
         </div>
@@ -1683,6 +1701,9 @@
         <div class="metrics-actions-bar" style="display: flex; justify-content: flex-end; gap: 8px;">
           <button id="refreshMetricsBtn" class="btn-stat-action">
             <i class="fa-solid fa-arrows-rotate"></i> 지표 새로고침
+          </button>
+          <button id="clearCacheBtn" class="btn-stat-action">
+            <i class="fa-solid fa-broom"></i> 캐시 비우기
           </button>
           <button id="resetMetricsBtn" class="btn-stat-action btn-danger-clear">
             <i class="fa-solid fa-trash-can"></i> 통계 초기화
@@ -1700,6 +1721,45 @@
           <span class="session-badge" id="secStatusPill">
             <i class="fa-solid fa-circle-check"></i> 필터 가동 중
           </span>
+        </div>
+
+        <!-- Security Metric Cards -->
+        <div class="metrics-grid" style="margin-bottom: 16px;">
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;"><i class="fa-solid fa-shield-check"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">총 입력 검사 건수</span>
+              <strong class="metric-val" id="metricTotalChecked">0건</strong>
+              <span class="metric-sub">실시간 전수 검증 질의</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(239, 68, 68, 0.2); color: #f87171;"><i class="fa-solid fa-user-shield"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">개인정보(PII) 비식별화</span>
+              <strong class="metric-val" id="metricPiiMasked">0건</strong>
+              <span class="metric-sub">주민번호/연락처 자동 마스킹</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;"><i class="fa-solid fa-ban"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">유해/인젝션 차단</span>
+              <strong class="metric-val" id="metricAbuseBlocked">0건</strong>
+              <span class="metric-sub">시스템 지침 우회 시도 차단</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd;"><i class="fa-solid fa-id-card"></i></div>
+            <div class="metric-info">
+              <span class="metric-label">주민등록번호 마스킹</span>
+              <strong class="metric-val" id="metricRrnMasked">0건</strong>
+              <span class="metric-sub">13자리 고유식별정보 보호</span>
+            </div>
+          </div>
         </div>
 
         <div style="background: rgba(18, 28, 48, 0.9); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: var(--radius-md); padding: 18px; margin-bottom: 16px;">
@@ -1784,6 +1844,10 @@
             </button>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="file" id="logImportFileInput" accept=".json" style="display: none;">
+            <button id="btnImportLogs" class="btn-stat-action" title="백업 JSON 파일로부터 질의 감사 이력 복원하기">
+              <i class="fa-solid fa-file-import"></i> JSON 불러오기
+            </button>
             <button id="btnExportLogs" class="btn-stat-action" title="전체 질의 이력 JSON 내보내기">
               <i class="fa-solid fa-download"></i> JSON 내보내기
             </button>
