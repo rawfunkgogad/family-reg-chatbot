@@ -669,8 +669,8 @@ function renderSourcesAccordion(sources) {
   header.className = "rag-sources-header";
   header.innerHTML = `
     <div class="rag-sources-title">
-      <i class="fa-solid fa-layer-group" style="color: #2dd4bf;"></i>
-      <span>참조된 e-family 및 법령 근거 (bge-reranker 선정)</span>
+      <i class="fa-solid fa-layer-group rag-sources-icon"></i>
+      <span>참조된 법령 및 실무 근거 (bge-reranker 선정)</span>
       <span class="rag-sources-count">${sources.length}건</span>
     </div>
     <i class="fa-solid fa-chevron-down toggle-icon" style="font-size: 11px;"></i>
@@ -690,7 +690,7 @@ function renderSourcesAccordion(sources) {
         <span class="rag-source-tag">[근거 ${idx + 1}] ${s.title || '법령 근거'}</span>
         ${scoreText ? `<span class="rag-score-badge">${scoreText}</span>` : ''}
       </div>
-      <div style="font-size: 11px; color: #2dd4bf; margin-bottom: 3px;">${linkifyLawReferences(s.source || '')}</div>
+      <div class="rag-source-source">${linkifyLawReferences(s.source || '')}</div>
       <div class="rag-source-text">${linkifyLawReferences(s.content || '')}</div>
     `;
     body.appendChild(item);
