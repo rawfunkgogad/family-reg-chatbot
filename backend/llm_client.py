@@ -1,12 +1,17 @@
 import os
 import json
 import time
+import asyncio
 import httpx
 from typing import AsyncGenerator, List, Dict, Any
 from prompts.system_prompt import get_system_prompt
 from rag.rag_service import rag_service
 from optimization.cache_manager import cache_manager
 from optimization.metrics_collector import metrics_collector
+
+# Global Semaphore for Concurrent Request Limit (1) & Queue Tracker
+llm_semaphore = asyncio.Semaphore(1)
+waiting_queue_count = 0
 
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://open.hasa.re.kr/v1")
 API_KEY = os.environ.get("OPENAI_API_KEY", "sk-dev-Un5B6gafFJxVcRwGnw5AlT23wDGn1ooA")
@@ -159,45 +164,80 @@ async def stream_chat_completion(
     accumulated_response = ""
     prompt_tokens_est = sum(estimate_tokens(m["content"]) for m in formatted_messages)
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        # Retry loop for 429 concurrent limit
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                async with client.stream("POST", f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
-                    if response.status_code == 429 and attempt < max_retries:
-                        await asyncio.sleep(1.5 * (attempt + 1))
-                        continue
-                    if response.status_code != 200:
-                        err_body = await response.aread()
-                        yield {"type": "error", "data": f"API 오류 ({response.status_code}): {err_body.decode('utf-8')}"}
-                        return
+    global waiting_queue_count
+    is_queued = False
+    
+    # Check if semaphore is currently busy
+    if llm_semaphore.locked():
+        is_queued = True
+        waiting_queue_count += 1
+        pos = waiting_queue_count
+        est_sec = pos * 3
+        yield {
+            "type": "queue_status",
+            "data": {
+                "waiting": True,
+                "position": pos,
+                "estimated_sec": est_sec,
+                "message": f"⏳ 앞선 민원 상담을 처리 중입니다. 잠시만 기다려 주세요 (대기 순번: {pos}번, 예상: 약 {est_sec}초)..."
+            }
+        }
 
-                    async for line in response.aiter_lines():
-                        trimmed = line.strip()
-                        if not trimmed:
-                            continue
-                        if trimmed.startswith("data:"):
-                            data_str = trimmed[5:].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk_json = json.loads(data_str)
-                                choices = chunk_json.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content = delta.get("content")
-                                    if content:
-                                        accumulated_response += content
-                                        yield {"type": "delta", "data": content}
-                            except Exception:
-                                pass
-                    return
-            except Exception as e:
-                if attempt == max_retries:
-                    yield {"type": "error", "data": f"\n\n[통신 오류]: {str(e)}"}
-                    return
-                await asyncio.sleep(1.5 * (attempt + 1))
+    try:
+        async with llm_semaphore:
+            if is_queued:
+                waiting_queue_count = max(0, waiting_queue_count - 1)
+                yield {
+                    "type": "queue_status",
+                    "data": {
+                        "waiting": False,
+                        "position": 0,
+                        "message": "✨ 차례가 되었습니다. 답변 생성을 시작합니다."
+                    }
+                }
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Retry loop for 429 concurrent limit
+                max_retries = 3
+                for attempt in range(max_retries + 1):
+                    try:
+                        async with client.stream("POST", f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
+                            if response.status_code == 429 and attempt < max_retries:
+                                await asyncio.sleep(1.5 * (attempt + 1))
+                                continue
+                            if response.status_code != 200:
+                                err_body = await response.aread()
+                                yield {"type": "error", "data": f"API 오류 ({response.status_code}): {err_body.decode('utf-8')}"}
+                                return
+
+                            async for line in response.aiter_lines():
+                                trimmed = line.strip()
+                                if not trimmed:
+                                    continue
+                                if trimmed.startswith("data:"):
+                                    data_str = trimmed[5:].strip()
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        chunk_json = json.loads(data_str)
+                                        choices = chunk_json.get("choices", [])
+                                        if choices:
+                                            delta = choices[0].get("delta", {})
+                                            content = delta.get("content")
+                                            if content:
+                                                accumulated_response += content
+                                                yield {"type": "delta", "data": content}
+                                    except Exception:
+                                        pass
+                            return
+                    except Exception as e:
+                        if attempt == max_retries:
+                            yield {"type": "error", "data": f"\n\n[통신 오류]: {str(e)}"}
+                            return
+                        await asyncio.sleep(1.5 * (attempt + 1))
+    finally:
+        if is_queued and waiting_queue_count > 0:
+            pass
 
     # 6. Post-processing: Latency, Tokens, Metrics & Cache Storage
     latency_ms = int((time.time() - start_time) * 1000)

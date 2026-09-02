@@ -88,14 +88,50 @@ marked.setOptions({
   }
 });
 
+// Theme Toggle Elements & Handlers
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
+  initThemeToggle();
   initMemo();
   loadEfamilyServices();
   loadQuickCases();
   setupEventListeners();
   setupAdminConsole();
 });
+
+function initThemeToggle() {
+  const savedTheme = localStorage.getItem("court_ai_theme") || "dark";
+  applyTheme(savedTheme);
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+      const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+      const nextTheme = currentTheme === "dark" ? "light" : "dark";
+      applyTheme(nextTheme);
+    });
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("court_ai_theme", theme);
+  
+  if (themeToggleBtn) {
+    const icon = themeToggleBtn.querySelector("i");
+    const text = themeToggleBtn.querySelector(".theme-text");
+    if (theme === "light") {
+      if (icon) icon.className = "fa-solid fa-sun";
+      if (text) text.textContent = "라이트";
+      themeToggleBtn.title = "다크 모드로 전환";
+    } else {
+      if (icon) icon.className = "fa-solid fa-moon";
+      if (text) text.textContent = "다크";
+      themeToggleBtn.title = "라이트 모드로 전환";
+    }
+  }
+}
 
 function initMemo() {
   const savedMemo = localStorage.getItem("family_reg_official_memo");
@@ -106,7 +142,7 @@ function initMemo() {
     localStorage.setItem("family_reg_official_memo", officialMemo.value);
   });
   clearMemoBtn.addEventListener("click", () => {
-    if (confirm("상담 메모를 모두 삭제하시겠습니까?")) {
+    if (confirm("심사 실무 메모를 모두 삭제하시겠습니까?")) {
       officialMemo.value = "";
       localStorage.removeItem("family_reg_official_memo");
     }
@@ -463,6 +499,24 @@ async function sendMessage(text, options = {}) {
             // 2. If PII notice event received
             else if (parsed.type === "pii_notice" && parsed.data) {
               piiNoticeData = parsed.data;
+            }
+            // 2.5 If queue status event received (concurrency limiter waiting)
+            else if (parsed.type === "queue_status" && parsed.data) {
+              if (parsed.data.waiting) {
+                const pos = parsed.data.position || 1;
+                const estSec = parsed.data.estimated_sec || (pos * 3);
+                contentDiv.innerHTML = `
+                  <div class="queue-waiting-indicator">
+                    <div class="queue-spinner-ring"><i class="fa-solid fa-hourglass-half fa-spin"></i></div>
+                    <div class="queue-info">
+                      <div class="queue-title"><i class="fa-solid fa-users-line"></i> 앞선 민원 상담 처리 중 (대기 순번: ${pos}번)</div>
+                      <div class="queue-desc">동시 요청을 안전하게 순차 처리하고 있습니다. 약 <strong>${estSec}초</strong> 후 답변이 시작됩니다...</div>
+                    </div>
+                  </div>
+                  <span class="streaming-cursor"></span>
+                `;
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+              }
             }
             // 3. If cache status event received
             else if (parsed.type === "cache_status" && parsed.data) {
