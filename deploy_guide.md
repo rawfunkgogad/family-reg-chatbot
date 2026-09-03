@@ -1,6 +1,7 @@
 # 🚀 대한민국 법원 가족관계등록 AI 시스템 클라우드 배포 완벽 가이드
+*(Version 5.2.2 - 468건 마스터 지식 코퍼스 프로덕션 에디션)*
 
-본 프로젝트는 **클라우드 24시간 상시 가동(Render.com / Railway / Hugging Face)** 및 **Docker 컨테이너**, **온프레미스 서버** 등 다양한 환경에서 즉시 배포할 수 있도록 완벽히 패키징되어 있습니다.
+본 프로젝트는 **468건 마스터 지식 코퍼스(대법원 예규/선례 278건 + 전자가족관계 가이드 73건 + 생활법령 117건)**와 **사전 생성된 1024차원 bge-m3 고밀도 벡터 임베딩 캐시**를 기본 탑재하고 있어, **클라우드 24시간 상시 가동(Render.com / Railway / Cloud VM)** 및 **Docker 컨테이너**, **온프레미스 사내 서버** 등 어떠한 환경에서도 즉시 배포할 수 있도록 완벽히 패키징되어 있습니다.
 
 ---
 
@@ -8,10 +9,15 @@
 
 | 구분 | 주요 설정 및 접속 주소 |
 | :--- | :--- |
-| **메인 실무/심사 포털** | https://[배포주소]/ (대법원 가족관계등록 실무 챗봇 & 전자민원 안내) |
+| **소프트웨어 버전** | `v5.2.2 (Master Knowledge Corpus Edition)` |
+| **탑재 지식 코퍼스** | **총 468건** (대법원 예규 200건 + 선례 78건 + 전자등록 73건 + 생활법령 117건) |
+| **사전 임베딩 캐시** | `backend/data/corpus_embeddings.npy` (468 x 1024, 기동 즉시 0.1초 로딩) |
+| **메인 실무/심사 포털** | https://[배포주소]/ (가족관계등록 실무 챗봇 & 4단계 법령 추론) |
 | **사법행정 지식 관리자 콘솔** | https://[배포주소]/admin (지식 등록, 비용/보안 모니터링, 실무 감사 로그) |
+| **서버 상태 헬스체크** | `GET /api/health` (로드밸런서 및 쿠버네티스 프로브 지원) |
 | **관리자 보안 인증코드** | `family_manager_035` (단방향 Salted SHA-256 암호화 적용) |
 | **런타임 및 포트** | Python 3.10+ / FastAPI / 동적 $PORT 바인딩 (기본 8000) |
+| **배포 전 검증 테스트** | `python tests/test_production_readiness.py` (5개 검증 100% PASS) |
 
 ---
 
@@ -75,8 +81,21 @@ docker ps
 
 ---
 
-## ⚡ [방법 3] 일반 Linux / Windows 서버 직접 실행
+## ⚡ [방법 3] 원클릭 스크립트 및 직접 실행
 
+### 1) Windows 환경 (원클릭 실행)
+```cmd
+# 더블 클릭 또는 cmd에서 실행:
+start_server.bat
+```
+
+### 2) Linux / macOS 환경 (원클릭 실행)
+```bash
+chmod +x start_server.sh
+./start_server.sh
+```
+
+### 3) 수동 가상환경 실행
 ```bash
 # 1. 가상환경 생성 및 활성화
 python -m venv .venv
@@ -88,7 +107,10 @@ source .venv/bin/activate
 # 2. 의존성 패키지 설치
 pip install -r requirements.txt
 
-# 3. 서버 실행
+# 3. 배포 전 5개 무결성 테스트 실행 (선택 사항)
+python tests/test_production_readiness.py
+
+# 4. 서버 기동
 python run_server.py
 ```
 

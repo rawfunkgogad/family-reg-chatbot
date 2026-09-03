@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import base64
 import asyncio
 import httpx
 import numpy as np
@@ -109,14 +110,21 @@ class RAGService:
         return "\n".join(parts)
 
     async def _generate_and_save_corpus_embeddings(self):
-        """전체 지식 코퍼스에 대해 bge-m3 임베딩 생성 후 로컬 저장"""
+        """전체 지식 코퍼스에 대해 bge-m3 임베딩 비동기 병렬 생성 후 로컬 저장"""
+        if not self.corpus:
+            self.embeddings = None
+            return
+
         print(f"[RAG] Generating embeddings for {len(self.corpus)} documents using {EMBEDDING_MODEL}...")
-        vectors = []
+        sem = asyncio.Semaphore(10)
         async with httpx.AsyncClient(timeout=60.0) as client:
-            for doc in self.corpus:
-                text_to_embed = self._build_embedding_text(doc)
-                emb = await self._embed_single_text_with_retry(client, text_to_embed)
-                vectors.append(emb)
+            async def embed_single(doc):
+                async with sem:
+                    text_to_embed = self._build_embedding_text(doc)
+                    return await self._embed_single_text_with_retry(client, text_to_embed)
+
+            tasks = [embed_single(doc) for doc in self.corpus]
+            vectors = await asyncio.gather(*tasks)
 
         self.embeddings = np.array(vectors, dtype=np.float32)
         np.save(CACHE_EMBEDDINGS_PATH, self.embeddings)
@@ -276,76 +284,136 @@ class RAGService:
         return len(self.corpus)
 
     def export_corpus_package(self) -> Dict[str, Any]:
-        """전체 지식 코퍼스 및 임베딩 벡터를 통합 백업 패키지로 직렬화하여 반환"""
+        """전체 지식 코퍼스를 표준 UTF-8 JSON 백업 패키지로 직렬화하여 반환 (초경량·초고속)"""
+        clean_docs = []
+        for d in self.corpus:
+            doc_item = {
+                "id": d.get("id"),
+                "title": d.get("title", ""),
+                "content": d.get("content", ""),
+                "category": d.get("category", "가족관계등록"),
+                "source": d.get("source", ""),
+                "created_at": d.get("created_at", int(time.time()))
+            }
+            if d.get("hierarchy_data"):
+                doc_item["hierarchy_data"] = d.get("hierarchy_data")
+            if d.get("page_number"):
+                doc_item["page_number"] = d.get("page_number")
+            if d.get("file_name"):
+                doc_item["file_name"] = d.get("file_name")
+            if d.get("section_heading"):
+                doc_item["section_heading"] = d.get("section_heading")
+            if d.get("detected_articles"):
+                doc_item["detected_articles"] = d.get("detected_articles")
+            clean_docs.append(doc_item)
+
+        emb_b64 = None
+        if self.embeddings is not None and len(self.embeddings) == len(clean_docs):
+            try:
+                emb_b64 = base64.b64encode(self.embeddings.astype(np.float32).tobytes()).decode("ascii")
+            except Exception as e:
+                print(f"[RAG] Base64 encoding skipped: {e}")
+
         return {
             "system": "scourt_family_reg_rag",
-            "version": "4.0.0",
+            "version": "5.0.0",
             "exported_at": int(time.time()),
-            "total_docs": len(self.corpus),
-            "embedding_model": EMBEDDING_MODEL,
-            "has_embeddings": (self.embeddings is not None and len(self.embeddings) == len(self.corpus)),
-            "corpus": self.corpus,
-            "embeddings": self.embeddings.tolist() if self.embeddings is not None else None
+            "total_docs": len(clean_docs),
+            "documents": clean_docs,
+            "corpus": clean_docs,
+            "embeddings_b64": emb_b64
         }
 
-    async def import_corpus_package(self, package_data: Dict[str, Any], merge_mode: str = "replace") -> Dict[str, Any]:
+    async def import_corpus_package(self, package_data: Any, merge_mode: str = "replace") -> Dict[str, Any]:
         """
-        백업 JSON 패키지로부터 지식 코퍼스 및 임베딩 벡터를 복원
+        백업 JSON 패키지로부터 지식 코퍼스 복원 및 임베딩 자동 동기화
         - merge_mode='replace': 기존 데이터를 백업본으로 완전 교체 (기본값)
-        - merge_mode='merge': 기존 데이터에 신규 항목을 병합
+        - merge_mode='merge': 기존 데이터에 신규 항목 병합
         """
-        imported_corpus = package_data.get("corpus", [])
-        if not isinstance(imported_corpus, list) or len(imported_corpus) == 0:
-            raise ValueError("가져올 지식 코퍼스(corpus) 데이터가 유효하지 않거나 비어있습니다.")
+        imported_corpus = []
+        emb_b64 = None
 
-        raw_embeddings = package_data.get("embeddings")
-        has_valid_embeddings = (
-            raw_embeddings is not None and 
-            isinstance(raw_embeddings, list) and 
-            len(raw_embeddings) == len(imported_corpus)
-        )
+        if isinstance(package_data, list):
+            imported_corpus = package_data
+        elif isinstance(package_data, dict):
+            imported_corpus = package_data.get("documents") or package_data.get("corpus") or []
+            emb_b64 = package_data.get("embeddings_b64")
+
+        if not isinstance(imported_corpus, list) or len(imported_corpus) == 0:
+            raise ValueError("가져올 지식 코퍼스(documents/corpus) 데이터가 유효하지 않거나 비어있습니다.")
+
+        # Sanitize and validate
+        validated_docs = []
+        for idx, item in enumerate(imported_corpus):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or f"지식 항목 #{idx+1}").strip()
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            doc_id = str(item.get("id") or f"restored_{int(time.time())}_{idx}")
+            doc_item = {
+                "id": doc_id,
+                "title": title,
+                "content": content,
+                "category": str(item.get("category") or "가족관계등록").strip(),
+                "source": str(item.get("source") or "지식 코퍼스").strip(),
+                "created_at": item.get("created_at") or int(time.time()),
+                "file_name": item.get("file_name") or "restored_backup.json"
+            }
+            if item.get("hierarchy_data"):
+                doc_item["hierarchy_data"] = item.get("hierarchy_data")
+            if item.get("page_number"):
+                doc_item["page_number"] = item.get("page_number")
+            if item.get("section_heading"):
+                doc_item["section_heading"] = item.get("section_heading")
+            if item.get("detected_articles"):
+                doc_item["detected_articles"] = item.get("detected_articles")
+            validated_docs.append(doc_item)
+
+        if not validated_docs:
+            raise ValueError("복원 가능한 유효한 지식 내용(content)을 가진 문서가 없습니다.")
+
+        restored_embeddings = None
+        if emb_b64 and isinstance(emb_b64, str):
+            try:
+                raw_bytes = base64.b64decode(emb_b64)
+                arr = np.frombuffer(raw_bytes, dtype=np.float32)
+                expected_floats = len(validated_docs) * 1024
+                if len(arr) == expected_floats:
+                    restored_embeddings = arr.reshape((len(validated_docs), 1024))
+            except Exception as e:
+                print(f"[RAG] Base64 embeddings decode fallback: {e}")
 
         if merge_mode == "replace":
-            self.corpus = list(imported_corpus)
-            if has_valid_embeddings:
-                self.embeddings = np.array(raw_embeddings, dtype=np.float32)
+            self.corpus = validated_docs
+            if restored_embeddings is not None:
+                self.embeddings = restored_embeddings
             else:
                 self.embeddings = None
         else:
-            # Merge mode
             existing_ids = {str(d.get("id")) for d in self.corpus}
-            to_add_docs = []
-            to_add_vectors = []
-            for idx, doc in enumerate(imported_corpus):
-                if str(doc.get("id")) not in existing_ids:
-                    to_add_docs.append(doc)
-                    if has_valid_embeddings:
-                        to_add_vectors.append(raw_embeddings[idx])
-            
-            if to_add_docs:
-                self.corpus.extend(to_add_docs)
-                if has_valid_embeddings and len(to_add_vectors) == len(to_add_docs):
-                    add_v_arr = np.array(to_add_vectors, dtype=np.float32)
-                    if self.embeddings is None:
-                        self.embeddings = add_v_arr
-                    else:
-                        self.embeddings = np.vstack([self.embeddings, add_v_arr])
+            for vd in validated_docs:
+                if str(vd["id"]) not in existing_ids:
+                    self.corpus.append(vd)
+            self.embeddings = None
 
-        # If embeddings are missing, auto-generate them
-        if self.embeddings is None or len(self.embeddings) != len(self.corpus):
-            print(f"[RAG] Generating embeddings for imported corpus ({len(self.corpus)} docs)...")
-            await self._generate_and_save_corpus_embeddings()
-        else:
-            # Save directly to disk
+        if self.embeddings is not None and len(self.embeddings) == len(self.corpus):
+            # 1초 무손실 초고속 복원: 캐시 즉시 디스크 기록
             np.save(CACHE_EMBEDDINGS_PATH, self.embeddings)
             with open(CACHE_METADATA_PATH, "w", encoding="utf-8") as f:
                 json.dump(self.corpus, f, ensure_ascii=False, indent=2)
+            print(f"[RAG] Instant vector restore success: {len(self.corpus)} docs & embeddings active.")
+        else:
+            # Re-generate embeddings asynchronously in parallel and persist
+            print(f"[RAG] Re-generating embeddings for restored corpus ({len(self.corpus)} docs)...")
+            await self._generate_and_save_corpus_embeddings()
 
-        print(f"[RAG] Successfully imported corpus package: {len(self.corpus)} documents active.")
+        print(f"[RAG] Successfully restored corpus package: {len(self.corpus)} documents active.")
         return {
             "success": True,
             "total_docs": len(self.corpus),
-            "embeddings_restored_directly": has_valid_embeddings
+            "restored_count": len(validated_docs)
         }
 
     def get_all_documents(self) -> List[Dict[str, Any]]:

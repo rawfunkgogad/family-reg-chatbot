@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -105,6 +105,17 @@ class ManualDocRequest(BaseModel):
 async def check_input_security(req: CheckInputRequest):
     """프론트엔드 실시간 개인정보 및 부적절 입력 사전 검증 API"""
     return input_filter.validate_and_sanitize(req.text)
+
+@app.get("/api/health")
+async def health_check():
+    """서버 상태 및 RAG 인덱스 헬스체크 API"""
+    return {
+        "status": "healthy",
+        "service": "family-registry-chatbot",
+        "version": "5.2.2",
+        "corpus_docs": len(rag_service.corpus),
+        "embeddings_ready": rag_service.embeddings is not None
+    }
 
 @app.get("/api/security/stats")
 async def get_security_statistics():
@@ -378,73 +389,149 @@ async def get_sample_hierarchy_excel(token: str = Depends(verify_admin_token)):
 
 @app.get("/api/admin/corpus/export")
 async def export_admin_corpus(token: str = Depends(verify_admin_token)):
-    """전체 지식 코퍼스 및 임베딩 벡터를 JSON 백업 파일로 직렬화하여 다운로드"""
+    """전체 지식 코퍼스를 표준 UTF-8 JSON 백업 파일로 직렬화하여 즉시 다운로드 (초고속·초경량)"""
     package = rag_service.export_corpus_package()
     timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     filename = f"scourt_family_reg_knowledge_backup_{timestamp_str}.json"
     
     json_bytes = json.dumps(package, ensure_ascii=False, indent=2).encode("utf-8")
-    return StreamingResponse(
-        io.BytesIO(json_bytes),
+    return Response(
+        content=json_bytes,
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(json_bytes)),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
     )
 
 @app.post("/api/admin/corpus/import")
 async def import_admin_corpus(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
-    """백업 JSON 파일로부터 지식 코퍼스 및 임베딩 벡터 복원"""
+    """백업 JSON 파일로부터 지식 코퍼스 복원 및 임베딩 자동 동기화"""
     if not file.filename.lower().endswith(".json"):
         raise HTTPException(status_code=400, detail="백업 파일은 .json 형식이어야 합니다.")
     
     try:
         content_bytes = await file.read()
-        package_data = json.loads(content_bytes.decode("utf-8"))
+        if not content_bytes:
+            raise HTTPException(status_code=400, detail="업로드된 백업 파일의 내용이 비어있습니다.")
+
+        try:
+            package_data = json.loads(content_bytes.decode("utf-8"))
+        except Exception as je:
+            raise HTTPException(status_code=400, detail=f"유효한 JSON 파일이 아닙니다: {str(je)}")
+
         result = await rag_service.import_corpus_package(package_data, merge_mode="replace")
         return {
             "success": True,
-            "message": f"성공적으로 {result['total_docs']}개의 지식 청크가 복원되었습니다.",
+            "message": f"총 {result['total_docs']}건의 지식 코퍼스가 성공적으로 복원되었습니다.",
             "total_docs": result["total_docs"],
-            "embeddings_restored_directly": result.get("embeddings_restored_directly", False)
+            "restored_count": result.get("restored_count", result["total_docs"])
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"백업 파일 복원 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"지식 복원 처리 중 오류 발생: {str(e)}")
 
 @app.post("/api/admin/upload")
-async def upload_document(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
-    filename = file.filename or "unknown_file"
-    file_bytes = await file.read()
-    
-    saved_path = UPLOAD_DIR / f"{int(time.time())}_{filename}"
-    with open(saved_path, "wb") as f:
-        f.write(file_bytes)
+async def upload_document(
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
+    token: str = Depends(verify_admin_token)
+):
+    incoming_files: List[UploadFile] = []
+    if files:
+        incoming_files.extend(files)
+    if file:
+        incoming_files.append(file)
 
-    docs = []
-    lower_fn = filename.lower()
-    if lower_fn.endswith((".xlsx", ".xls")):
-        docs = parse_excel(file_bytes, filename)
-    elif lower_fn.endswith(".pdf"):
-        docs = parse_pdf(file_bytes, filename)
-    elif lower_fn.endswith(".json"):
-        docs = parse_json(file_bytes, filename)
-    else:
-        raise HTTPException(status_code=400, detail="지원되지 않는 파일 형식입니다. (PDF, JSON 또는 엑셀 .xlsx만 지원)")
+    if not incoming_files:
+        raise HTTPException(status_code=400, detail="업로드할 파일이 지정되지 않았습니다.")
 
-    if not docs:
-        raise HTTPException(status_code=400, detail="문서에서 추출 가능한 유효한 지식/법령 데이터가 없습니다.")
-
-    # 동일 파일명이 기존 코퍼스에 이미 존재한다면 구버전 청크를 먼저 깔끔하게 교체 정리
+    all_parsed_docs = []
+    file_results = []
     existing_files = rag_service.get_grouped_files()
-    for ef in existing_files:
-        if ef.get("file_name") == filename or ef.get("file_name") == filename.rsplit('.', 1)[0] + ".pdf":
-            print(f"[Upload] Replacing existing version of '{filename}' ({ef.get('file_id')})...")
-            await rag_service.delete_file_group(ef.get("file_id"))
 
-    added_count = await rag_service.add_documents(docs)
+    for f in incoming_files:
+        filename = f.filename or "unknown_file"
+        try:
+            file_bytes = await f.read()
+            if not file_bytes:
+                file_results.append({
+                    "filename": filename,
+                    "chunks": 0,
+                    "status": "error",
+                    "error": "빈 파일입니다."
+                })
+                continue
+
+            saved_path = UPLOAD_DIR / f"{int(time.time())}_{filename}"
+            with open(saved_path, "wb") as out_f:
+                out_f.write(file_bytes)
+
+            docs = []
+            lower_fn = filename.lower()
+            if lower_fn.endswith((".xlsx", ".xls")):
+                docs = parse_excel(file_bytes, filename)
+            elif lower_fn.endswith(".pdf"):
+                docs = parse_pdf(file_bytes, filename)
+            elif lower_fn.endswith(".json"):
+                docs = parse_json(file_bytes, filename)
+            else:
+                file_results.append({
+                    "filename": filename,
+                    "chunks": 0,
+                    "status": "error",
+                    "error": "지원되지 않는 파일 형식 (PDF, JSON, 엑셀만 지원)"
+                })
+                continue
+
+            if not docs:
+                file_results.append({
+                    "filename": filename,
+                    "chunks": 0,
+                    "status": "error",
+                    "error": "추출 가능한 유효한 지식/법령 데이터가 없습니다."
+                })
+                continue
+
+            # 동일 파일명이 기존 코퍼스에 이미 존재한다면 구버전 청크를 먼저 깔끔하게 교체 정리
+            for ef in existing_files:
+                if ef.get("file_name") == filename or ef.get("file_name") == filename.rsplit('.', 1)[0] + ".pdf":
+                    print(f"[Upload] Replacing existing version of '{filename}' ({ef.get('file_id')})...")
+                    await rag_service.delete_file_group(ef.get("file_id"))
+
+            all_parsed_docs.extend(docs)
+            file_results.append({
+                "filename": filename,
+                "chunks": len(docs),
+                "status": "success"
+            })
+        except Exception as fe:
+            file_results.append({
+                "filename": filename,
+                "chunks": 0,
+                "status": "error",
+                "error": str(fe)
+            })
+
+    if not all_parsed_docs:
+        failed_msgs = "; ".join([f"{r['filename']}: {r.get('error', '추출 실패')}" for r in file_results])
+        raise HTTPException(status_code=400, detail=f"처리 가능한 파일이 없습니다. ({failed_msgs})")
+
+    added_count = await rag_service.add_documents(all_parsed_docs)
+    total_docs = len(rag_service.get_all_documents())
+
     return {
         "success": True,
-        "filename": filename,
+        "total_files": len(file_results),
+        "successful_files": len([r for r in file_results if r["status"] == "success"]),
         "chunks_created": added_count,
-        "total_corpus_docs": len(rag_service.get_all_documents())
+        "files": file_results,
+        "total_corpus_docs": total_docs,
+        "filename": incoming_files[0].filename if len(incoming_files) == 1 else f"{len(incoming_files)}개 파일"
     }
 
 @app.post("/api/admin/document")
@@ -505,85 +592,6 @@ async def reindex_corpus(token: str = Depends(verify_admin_token)):
         "success": True,
         "reindexed_count": total
     }
-
-# --- 지식 코퍼스 백업(Export) 및 1초 무손실 복원(Import) API 엔드포인트 ---
-
-@app.get("/api/admin/corpus/export")
-async def export_corpus_package(token: str = Depends(verify_admin_token)):
-    """전체 지식 코퍼스 문서 및 임베딩 벡터를 JSON 백업 패키지로 내보내기"""
-    docs = rag_service.get_all_documents()
-    emb_list = None
-    if rag_service.document_embeddings is not None and len(rag_service.document_embeddings) == len(docs):
-        emb_list = rag_service.document_embeddings.tolist()
-    
-    export_payload = {
-        "version": "4.0.0",
-        "exported_at": int(time.time()),
-        "total_docs": len(docs),
-        "documents": docs,
-        "embeddings": emb_list
-    }
-    
-    content = json.dumps(export_payload, ensure_ascii=False, indent=2)
-    timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    return StreamingResponse(
-        io.BytesIO(content.encode("utf-8")),
-        media_type="application/json",
-        headers={
-            "Content-Disposition": f"attachment; filename=scourt_family_knowledge_backup_{timestamp_str}.json",
-            "Cache-Control": "no-cache, no-store, must-revalidate"
-        }
-    )
-
-@app.post("/api/admin/corpus/import")
-async def import_corpus_package(
-    file: UploadFile = File(...),
-    token: str = Depends(verify_admin_token)
-):
-    """백업 JSON 파일로부터 전체 지식 코퍼스 및 임베딩 벡터 1초 무손실 복원"""
-    try:
-        content_bytes = await file.read()
-        data = json.loads(content_bytes.decode("utf-8"))
-        
-        docs = []
-        if isinstance(data, list):
-            docs = data
-        elif isinstance(data, dict):
-            docs = data.get("documents", [])
-        
-        if not docs or not isinstance(docs, list):
-            raise HTTPException(status_code=400, detail="유효한 지식 문서 목록이 포함되어 있지 않습니다.")
-        
-        import numpy as np
-        emb_list = data.get("embeddings") if isinstance(data, dict) else None
-        
-        # 1. 문서 복원
-        rag_service.documents = docs
-        
-        # 2. 임베딩 복원 또는 재색인
-        if emb_list and isinstance(emb_list, list) and len(emb_list) == len(docs):
-            rag_service.document_embeddings = np.array(emb_list, dtype=np.float32)
-            # 캐시 파일 영구 저장
-            np.save(str(DATA_DIR / "corpus_embeddings.npy"), rag_service.document_embeddings)
-            print(f"[RAG Import] Successfully restored {len(docs)} documents and pre-computed embeddings.")
-        else:
-            print(f"[RAG Import] Re-indexing {len(docs)} documents with bge-m3...")
-            await rag_service.reindex_all()
-        
-        # 3. metadata.json 영구 저장
-        metadata_file = DATA_DIR / "corpus_metadata.json"
-        with open(metadata_file, "w", encoding="utf-8") as f:
-            json.dump(docs, f, ensure_ascii=False, indent=2)
-            
-        return {
-            "success": True,
-            "message": f"{len(docs)}건의 지식 코퍼스 및 임베딩이 성공적으로 복원되었습니다.",
-            "total_docs": len(docs)
-        }
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="유효한 JSON 파일 형식이 아닙니다.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"복원 실패: {str(e)}")
 
 # --- 관리자 질의 이력 (Audit Logs) API 엔드포인트 ---
 

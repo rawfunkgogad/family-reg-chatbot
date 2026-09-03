@@ -1,8 +1,12 @@
 """
 가족관계등록 실무·선례·예규 및 대한민국 법원 전자가족관계등록시스템(efamily.scourt.go.kr) 통합 코퍼스 데이터
 """
+import json
+from pathlib import Path
 
-CORPUS_DOCS = [
+MASTER_CORPUS_FILE = Path(__file__).parent.parent / "data" / "corpus" / "master_family_reg_knowledge_corpus.json"
+
+_BUILTIN_FALLBACK_DOCS = [
     # --- [1. 전자가족관계등록시스템: 온라인 증명서 발급/열람 서비스] ---
     {
         "id": "EFAMILY-CERT-01",
@@ -179,3 +183,14 @@ CORPUS_DOCS = [
         "content": "개명하고자 하는 자는 주소지 또는 등록기준지 관할 가정법원의 개명허가를 받고, 허가결정등본을 송달받은 날부터 1개월 이내에 개명신고를 하여야 한다. 신고된 이름에 한자가 포함된 경우 대법원규칙으로 정한 '인명용 한자' 범위 내에 속하는지 전산 대조 심사하여야 하며, 인명용 한자가 아닌 경우 한글로만 기록하거나 보정명령을 발령한다."
     }
 ]
+
+# 마스터 코퍼스(대법원 예규/선례 278건 + 전자가족관계 73건 + 생활법령 117건 = 468건) 기본 로드
+if MASTER_CORPUS_FILE.exists():
+    try:
+        with open(MASTER_CORPUS_FILE, "r", encoding="utf-8") as f:
+            CORPUS_DOCS = json.load(f)
+    except Exception as e:
+        print(f"[CorpusData] Warning: Failed to load master corpus ({e}), falling back to builtin docs.")
+        CORPUS_DOCS = _BUILTIN_FALLBACK_DOCS
+else:
+    CORPUS_DOCS = _BUILTIN_FALLBACK_DOCS

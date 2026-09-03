@@ -4,6 +4,10 @@ let adminFilesList = [];
 let adminDocsList = [];
 let currentDocViewMode = "split"; // "split" | "files" | "chunks"
 let currentTab = "tab-upload"; // active tab id
+let currentLogPage = 1;
+let currentLogSearch = "";
+let totalLogPages = 1;
+let currentDetailLog = null;
 
 // DOM Elements
 const authSection = document.getElementById("authSection");
@@ -247,6 +251,9 @@ function showDashboardView() {
   dashboardSection.style.display = "flex";
   sessionBadge.style.display = "flex";
   btnLogout.style.display = "inline-flex";
+  if (typeof initCorpusBackupRestore === 'function') {
+    initCorpusBackupRestore();
+  }
 }
 
 function showLoginAlert(msg) {
@@ -277,8 +284,8 @@ function setupDashboardEvents() {
       const targetPane = document.getElementById(tabId);
       if (targetPane) {
         targetPane.classList.add("active");
-        // #tab-list needs flex display for split explorer to fill remaining height
-        targetPane.style.display = (tabId === "tab-list") ? "flex" : "block";
+        // All active tab panes use flex display for full height and smooth internal/pane scrolling
+        targetPane.style.display = "flex";
       }
 
       if (tabId === "tab-list") {
@@ -354,14 +361,20 @@ function setupDashboardEvents() {
 
   if (dropzone) {
     dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
       const files = e.dataTransfer.files;
-      if (files.length > 0) uploadFile(files[0]);
+      if (files && files.length > 0) {
+        uploadMultipleFiles(Array.from(files));
+      }
     });
   }
 
   if (fileInput) {
     fileInput.addEventListener('change', (e) => {
-      if (e.target.files.length > 0) uploadFile(e.target.files[0]);
+      if (e.target.files && e.target.files.length > 0) {
+        uploadMultipleFiles(Array.from(e.target.files));
+      }
     });
   }
 
@@ -416,93 +429,16 @@ function setupDashboardEvents() {
     });
   }
 
-  // Reindex all button
-  if (reindexAllBtn) {
-    reindexAllBtn.addEventListener('click', async () => {
-      if (!confirm('현재 등록된 모든 문서에 대해 bge-m3 임베딩을 다시 생성하시겠습니까?')) return;
-      reindexAllBtn.disabled = true;
-      reindexAllBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 재색인 중...';
-      try {
-        const res = await authFetch('/api/admin/reindex', { method: 'POST' });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          alert(`전체 ${data.reindexed_count}건의 문서가 성공적으로 재임베딩되었습니다.`);
-          loadAdminFiles();
-          loadAdminDocuments();
-        }
-      } catch (err) {
-        alert(`재색인 실패: ${err.message}`);
-      } finally {
-        reindexAllBtn.disabled = false;
-        reindexAllBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> 재색인';
-      }
-    });
-  }
-
-  // Clear all documents button
-  if (clearAllDocsBtn) {
-    clearAllDocsBtn.addEventListener('click', async () => {
-      const confirmText = prompt('등록된 모든 RAG 지식 문서와 임베딩 인덱스를 완전히 삭제하시겠습니까?\n삭제를 진행하려면 "전체삭제"를 입력하세요:');
-      if (confirmText !== '전체삭제') {
-        if (confirmText !== null) alert('입력 내용이 일치하지 않아 삭제가 취소되었습니다.');
-        return;
-      }
-
-      clearAllDocsBtn.disabled = true;
-      clearAllDocsBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 삭제 중...';
-      try {
-        const res = await authFetch('/api/admin/documents', { method: 'DELETE' });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          alert('모든 RAG 지식 문서 및 임베딩 인덱스가 완전히 삭제되었습니다.');
-          loadAdminFiles();
-          loadAdminDocuments();
-        } else {
-          alert(`삭제 실패: ${data.detail || '오류 발생'}`);
-        }
-      } catch (err) {
-        alert(`오류: ${err.message}`);
-      } finally {
-        clearAllDocsBtn.disabled = false;
-        clearAllDocsBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i> 전체 삭제';
-      }
-    });
-  }
-
-  // Reset to default corpus button
-  if (resetDefaultBtn) {
-    resetDefaultBtn.addEventListener('click', async () => {
-      if (!confirm('초기 기본 가족관계등록 법령/선례 지식 데이터로 복원하고 bge-m3 재임베딩을 진행하시겠습니까?')) return;
-      resetDefaultBtn.disabled = true;
-      resetDefaultBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 복원 중...';
-      try {
-        const res = await authFetch('/api/admin/reset-default', { method: 'POST' });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          alert(`기본 지식 코퍼스(${data.total_docs}건)로 성공적으로 복원 및 재임베딩되었습니다.`);
-          loadAdminFiles();
-          loadAdminDocuments();
-        }
-      } catch (err) {
-        alert(`복원 실패: ${err.message}`);
-      } finally {
-        resetDefaultBtn.disabled = false;
-        resetDefaultBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 기본 복원';
-      }
-    });
-  }
-
-  // Doc View Mode Switching (Split Master-Detail, Files Grouped, Chunks Table)
   // Global Keyboard Navigation for 2-Column Split View
   document.addEventListener('keydown', (e) => {
     if (currentTab === 'tab-list' && currentDocViewMode === 'split') {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
       if (e.key === 'ArrowLeft' || (e.altKey && e.key === 'ArrowLeft')) {
         e.preventDefault();
-        navigateSplitChunk(-1);
+        if (typeof navigateSplitDoc === 'function') navigateSplitDoc(-1);
       } else if (e.key === 'ArrowRight' || (e.altKey && e.key === 'ArrowRight')) {
         e.preventDefault();
-        navigateSplitChunk(1);
+        if (typeof navigateSplitDoc === 'function') navigateSplitDoc(1);
       }
     }
   });
@@ -595,89 +531,8 @@ function setupDashboardEvents() {
     });
   }
 
-  // Export Knowledge Base Package
-  const btnExportCorpus = document.getElementById("btnExportCorpus");
-  if (btnExportCorpus) {
-    btnExportCorpus.addEventListener("click", async () => {
-      btnExportCorpus.disabled = true;
-      btnExportCorpus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 백업 생성 중...';
-      try {
-        const res = await authFetch('/api/admin/corpus/export');
-        if (!res.ok) throw new Error('백업 파일 생성에 실패했습니다.');
-        
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const nowStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const filename = `scourt_family_knowledge_backup_${nowStr}.json`;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-        
-        showAdminToast(`지식 코퍼스 및 임베딩 백업 파일(${filename})이 정상 다운로드되었습니다!`, 'success');
-      } catch (err) {
-        showAdminToast(`백업 오류: ${err.message}`, 'error');
-      } finally {
-        btnExportCorpus.disabled = false;
-        btnExportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 지식 백업 (Export)';
-      }
-    });
-  }
-
-  // Import Knowledge Base Package
-  const btnImportCorpus = document.getElementById("btnImportCorpus");
-  const corpusImportFileInput = document.getElementById("corpusImportFileInput");
-  if (btnImportCorpus && corpusImportFileInput) {
-    btnImportCorpus.addEventListener("click", () => {
-      corpusImportFileInput.click();
-    });
-
-    corpusImportFileInput.addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      if (!file.name.toLowerCase().endsWith('.json')) {
-        showAdminToast('백업 파일은 .json 형식이어야 합니다.', 'error');
-        corpusImportFileInput.value = '';
-        return;
-      }
-
-      if (!confirm(`'${file.name}' 백업 파일로부터 전체 지식 베이스를 복원하시겠습니까?\n(기존 데이터가 백업본으로 안전하게 교체됩니다)`)) {
-        corpusImportFileInput.value = '';
-        return;
-      }
-
-      btnImportCorpus.disabled = true;
-      btnImportCorpus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 지식 복원 중...';
-
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const res = await authFetch('/api/admin/corpus/import', {
-          method: 'POST',
-          body: formData
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          showAdminToast(`총 ${data.total_docs}건의 지식 코퍼스 및 임베딩이 100% 완벽하게 복원되었습니다!`, 'success');
-          await loadAdminFiles();
-          await loadAdminDocuments();
-        } else {
-          showAdminToast(`복원 실패: ${data.detail || '오류 발생'}`, 'error');
-        }
-      } catch (err) {
-        showAdminToast(`복원 오류: ${err.message}`, 'error');
-      } finally {
-        btnImportCorpus.disabled = false;
-        btnImportCorpus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 지식 복원 (Import)';
-        corpusImportFileInput.value = '';
-      }
-    });
-  }
+  // Initialize Knowledge Corpus Backup & Restore
+  initCorpusBackupRestore();
 
   // Metrics handlers
   if (refreshMetricsBtn) {
@@ -719,19 +574,189 @@ function setupDashboardEvents() {
   }
 }
 
-// Upload file
-async function uploadFile(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (ext !== 'pdf' && ext !== 'json' && ext !== 'xlsx' && ext !== 'xls') {
-    showUploadStatus('PDF, JSON 또는 엑셀(.xlsx, .xls) 파일만 업로드할 수 있습니다.', 'error');
+// ==========================================
+// 🛡️ 지식 코퍼스 백업(Export) & 1초 무손실 복원(Import) 시스템 (완전 재구현)
+// ==========================================
+function initCorpusBackupRestore() {
+  const btnExport = document.getElementById("btnExportCorpus");
+  const btnImport = document.getElementById("btnImportCorpus");
+  const fileInput = document.getElementById("corpusImportFileInput");
+
+  if (!btnExport || !btnImport || !fileInput) return;
+
+  // 1. 지식 코퍼스 백업 (Export)
+  btnExport.onclick = async (e) => {
+    e.preventDefault();
+    if (!adminToken) {
+      alert("관리자 세션이 만료되었습니다. 다시 로그인해주세요.");
+      showAuthView();
+      return;
+    }
+
+    const origHtml = btnExport.innerHTML;
+    btnExport.disabled = true;
+    btnExport.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 백업 파일 생성 중...';
+
+    try {
+      const res = await authFetch('/api/admin/corpus/export');
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`백업 실패 (${res.status}): ${errText}`);
+      }
+
+      const blob = await res.blob();
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const filename = `scourt_family_knowledge_backup_${timestamp}.json`;
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 200);
+
+      showAdminToast(`지식 코퍼스 백업 파일(${filename})이 정상 다운로드되었습니다!`, 'success', 5000);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert(`지식 백업 오류: ${err.message}`);
+      showAdminToast(`지식 백업 오류: ${err.message}`, 'error', 5000);
+    } finally {
+      btnExport.disabled = false;
+      btnExport.innerHTML = origHtml;
+    }
+  };
+
+  // 2. 지식 코퍼스 복원 (Import) 파일 선택기 열기
+  btnImport.onclick = (e) => {
+    e.preventDefault();
+    if (!adminToken) {
+      alert("관리자 세션이 만료되었습니다. 다시 로그인해주세요.");
+      showAuthView();
+      return;
+    }
+    fileInput.value = "";
+    fileInput.click();
+  };
+
+  // 3. 파일 선택 완료 시 복원 처리
+  fileInput.onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      alert('백업 파일은 .json 확장자만 지원됩니다.');
+      fileInput.value = "";
+      return;
+    }
+
+    // 파일 사전 파싱 및 검증
+    let docCount = 0;
+    try {
+      const fileText = await file.text();
+      const parsed = JSON.parse(fileText);
+      if (Array.isArray(parsed)) {
+        docCount = parsed.length;
+      } else if (parsed && typeof parsed === 'object') {
+        const docs = parsed.documents || parsed.corpus || [];
+        docCount = docs.length;
+      }
+    } catch (jsonErr) {
+      alert(`유효하지 않은 백업 JSON 파일입니다: ${jsonErr.message}`);
+      fileInput.value = "";
+      return;
+    }
+
+    const confirmMsg = `[지식 코퍼스 복원 확인]\n\n선택한 파일: ${file.name}\n감지된 지식 문서: 약 ${docCount}건\n\n이 백업 파일로부터 현재 지식 코퍼스를 복원하시겠습니까?\n(기존 지식 데이터가 백업 내용으로 안전하게 교체되며 bge-m3 임베딩이 자동 동기화됩니다)`;
+    if (!confirm(confirmMsg)) {
+      fileInput.value = "";
+      return;
+    }
+
+    const origHtml = btnImport.innerHTML;
+    btnImport.disabled = true;
+    btnImport.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 지식 복원 중...';
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await authFetch('/api/admin/corpus/import', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.message || '지식 복원 처리에 실패했습니다.');
+      }
+
+      showAdminToast(`총 ${data.total_docs}건의 지식 코퍼스가 완벽하게 복원되었습니다!`, 'success', 5000);
+      alert(`지식 코퍼스 복원 완료!\n- 복원 건수: ${data.total_docs}건\n- 지식 코퍼스 및 임베딩이 정상 동기화되었습니다.`);
+
+      // 대시보드 데이터 즉시 새로고침
+      await loadAdminFiles();
+      await loadAdminDocuments();
+      if (typeof loadMetricsStats === 'function') loadMetricsStats();
+    } catch (err) {
+      console.error('Import error:', err);
+      alert(`지식 복원 실패: ${err.message}`);
+      showAdminToast(`지식 복원 오류: ${err.message}`, 'error', 5000);
+    } finally {
+      btnImport.disabled = false;
+      btnImport.innerHTML = origHtml;
+      fileInput.value = "";
+    }
+  };
+}
+window.initCorpusBackupRestore = initCorpusBackupRestore;
+
+// Upload Multiple Files (PDF / JSON / EXCEL 다건 동시 등록 지원)
+async function uploadMultipleFiles(files) {
+  if (!files || files.length === 0) return;
+
+  const validExts = ['pdf', 'json', 'xlsx', 'xls'];
+  const validFiles = [];
+  const invalidFiles = [];
+
+  for (const f of files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (validExts.includes(ext)) {
+      validFiles.push(f);
+    } else {
+      invalidFiles.push(f.name);
+    }
+  }
+
+  if (validFiles.length === 0) {
+    showUploadStatus('지원되지 않는 파일 형식입니다. (PDF, JSON 또는 엑셀(.xlsx, .xls)만 지원)', 'error');
+    if (fileInput) fileInput.value = '';
     return;
   }
 
   const formData = new FormData();
-  formData.append('file', file);
+  validFiles.forEach(f => formData.append('files', f));
 
-  const fileTypeLabel = (ext === 'xlsx' || ext === 'xls') ? '상하위 법령 엑셀' : (ext === 'pdf' ? 'PDF 실무편람' : 'JSON 지식');
-  showUploadStatus(`'${file.name}' (${fileTypeLabel}) 업로드 및 bge-m3 임베딩 생성 중...`, 'loading');
+  const fileNames = validFiles.map(f => f.name).join(', ');
+  const fileSummary = validFiles.length === 1 
+    ? `'${validFiles[0].name}'` 
+    : `총 ${validFiles.length}개 파일 (${fileNames.length > 50 ? fileNames.slice(0, 47) + '...' : fileNames})`;
+
+  showUploadStatus(`
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 18px;"></i>
+      <div>
+        <strong>${fileSummary}</strong> 업로드 및 지식 임베딩 생성 중...
+        <div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">bge-m3 벡터 인덱싱과 상하위 법령 체인을 동시에 구축하고 있습니다.</div>
+      </div>
+    </div>
+  `, 'loading');
 
   try {
     const res = await authFetch('/api/admin/upload', {
@@ -741,17 +766,40 @@ async function uploadFile(file) {
     const data = await res.json();
 
     if (res.ok && data.success) {
-      showUploadStatus(`'${file.name}' 등록 완료! (${data.chunks_created}개 지식/법령 체인 생성 및 bge-m3 임베딩 완료)`, 'success');
+      const summaryList = (data.files || []).map(f => {
+        if (f.status === 'success') {
+          return `<li style="margin-bottom: 3px;"><i class="fa-solid fa-check" style="color: #10b981; margin-right: 6px;"></i><strong>${escapeHtml(f.filename)}</strong>: ${f.chunks}개 청크 등록 완료</li>`;
+        } else {
+          return `<li style="margin-bottom: 3px;"><i class="fa-solid fa-triangle-exclamation" style="color: #f59e0b; margin-right: 6px;"></i><strong>${escapeHtml(f.filename)}</strong>: <span style="color:#ef4444;">${escapeHtml(f.error || '오류')}</span></li>`;
+        }
+      }).join('');
+
+      showUploadStatus(`
+        <div style="text-align: left; line-height: 1.6;">
+          <div style="font-weight: 700; margin-bottom: 6px; font-size: 14px; color: #10b981;">
+            <i class="fa-solid fa-circle-check"></i> 총 ${data.successful_files || data.total_files}개 파일 등록 성공! (${data.chunks_created}개 지식/법령 체인 생성 및 bge-m3 임베딩 완료)
+          </div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 12px; max-height: 130px; overflow-y: auto;">
+            ${summaryList}
+          </ul>
+        </div>
+      `, 'success');
+
       loadAdminFiles();
       loadAdminDocuments();
     } else {
-      showUploadStatus(`업로드 실패: ${data.detail || '오류 발생'}`, 'error');
+      showUploadStatus(`업로드 실패: ${data.detail || '오류가 발생했습니다.'}`, 'error');
     }
   } catch (err) {
     showUploadStatus(`업로드 오류: ${err.message}`, 'error');
   } finally {
     if (fileInput) fileInput.value = '';
   }
+}
+
+// 하위 호환성 유지용 단일 파일 업로드 래퍼
+async function uploadFile(file) {
+  return uploadMultipleFiles([file]);
 }
 
 function showUploadStatus(msg, type) {
@@ -795,6 +843,7 @@ function setDocViewMode(mode) {
   const splitCont = document.getElementById('splitViewContainer');
   const filesCont = document.getElementById('filesViewContainer');
   const chunksCont = document.getElementById('chunksViewContainer');
+  const docSearchInput = document.getElementById('docSearchInput');
 
   if (splitBtn) splitBtn.classList.toggle('active', mode === 'split');
   if (filesBtn) filesBtn.classList.toggle('active', mode === 'files');
@@ -802,10 +851,18 @@ function setDocViewMode(mode) {
 
   if (splitCont) splitCont.style.display = (mode === 'split') ? 'flex' : 'none';
   if (filesCont) filesCont.style.display = (mode === 'files') ? 'block' : 'none';
-  if (chunksCont) chunksCont.style.display = (mode === 'chunks') ? 'block' : 'none';
+  if (chunksCont) chunksCont.style.display = (mode === 'chunks') ? 'flex' : 'none';
+
+  if (docSearchInput) {
+    docSearchInput.style.display = (mode === 'chunks') ? 'inline-block' : 'none';
+  }
 
   if (mode === 'split') {
     renderSplitView();
+  } else if (mode === 'files') {
+    renderAdminFiles(adminFilesList);
+  } else if (mode === 'chunks') {
+    renderAdminDocTable(adminDocsList);
   }
 }
 window.setDocViewMode = setDocViewMode;
@@ -912,6 +969,20 @@ window.selectSplitDocument = function(fileId) {
   splitDocState.chunkSearch = ''; // reset in-doc search query
   renderSplitView();
 };
+
+// Keyboard navigation between documents in split view
+function navigateSplitDoc(direction) {
+  if (!adminFilesList || adminFilesList.length === 0) return;
+  const currentIdx = adminFilesList.findIndex(f => f.file_id === splitDocState.selectedFileId);
+  let nextIdx = (currentIdx === -1 ? 0 : currentIdx) + direction;
+  if (nextIdx < 0) nextIdx = 0;
+  if (nextIdx >= adminFilesList.length) nextIdx = adminFilesList.length - 1;
+  splitDocState.selectedFileId = adminFilesList[nextIdx].file_id;
+  splitDocState.chunkSearch = '';
+  renderSplitView();
+}
+window.navigateSplitDoc = navigateSplitDoc;
+window.navigateSplitChunk = navigateSplitDoc;
 
 // Search documents in left sidebar
 window.onSplitDocSearch = function(query) {
@@ -1694,10 +1765,7 @@ function formatLogDateTime(log) {
 // 📋 실무 질의 이력 감사 (Query History & Audit Logs)
 // ==========================================
 
-let currentLogPage = 1;
-let currentLogSearch = "";
-let totalLogPages = 1;
-let currentDetailLog = null;
+// (currentLogPage, currentLogSearch, totalLogPages, currentDetailLog declared at top of file)
 
 // Query Log Elements
 const tabLogsCount = document.getElementById("tabLogsCount");
