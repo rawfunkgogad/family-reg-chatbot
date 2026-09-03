@@ -263,6 +263,48 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=4.2.0"></script>
+  <!-- Supreme Court Directives & Precedents In-App Viewer Modal -->
+  <div class="modal-overlay" id="legalDocModal" style="display: none;">
+    <div class="modal-card legal-doc-modal-card">
+      <div class="modal-header legal-doc-modal-header">
+        <div class="legal-doc-modal-title">
+          <i class="fa-solid fa-scale-balanced" id="legalDocIcon"></i>
+          <div>
+            <span class="legal-doc-badge" id="legalDocCategory">대법원 가족관계등록예규</span>
+            <h3 id="legalDocTitle">원문 불러오는 중...</h3>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="btnCloseLegalDocModal">&times;</button>
+      </div>
+      <div class="modal-body legal-doc-modal-body">
+        <div class="legal-doc-meta-bar">
+          <div class="meta-item"><i class="fa-solid fa-bookmark"></i> <span id="legalDocSource">출처: 대법원 사법정보공개포털</span></div>
+          <div class="meta-item"><i class="fa-solid fa-hashtag"></i> <span id="legalDocId">문서 ID</span></div>
+        </div>
+
+        <div class="legal-doc-content-wrapper">
+          <pre class="legal-doc-content-box" id="legalDocContent">원문을 불러오고 있습니다...</pre>
+        </div>
+
+        <div class="legal-doc-action-bar">
+          <button class="btn-legal-action" id="btnCopyLegalDocText">
+            <i class="fa-solid fa-copy"></i> <span>본문 복사</span>
+          </button>
+          <a href="#" target="_blank" class="btn-legal-action btn-scourt-portal" id="linkScourtPortal">
+            <i class="fa-solid fa-building-columns"></i> <span>대법원 사법포털 바로가기</span> <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px;"></i>
+          </a>
+          <a href="#" target="_blank" class="btn-legal-action btn-law-portal" id="linkLawGoKr">
+            <i class="fa-solid fa-book-open"></i> <span>국가법령정보센터 스마트 검색</span> <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px;"></i>
+          </a>
+        </div>
+      </div>
+      <div class="modal-footer legal-doc-modal-footer">
+        <span class="legal-doc-notice"><i class="fa-solid fa-circle-check"></i> 본 어시스턴트에 내장된 대법원 공식 1차 마이닝 전문 데이터입니다.</span>
+        <button class="btn-secondary" id="btnCloseLegalDocBottom">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=5.3.1"></script>
 </body>
 </html>

@@ -1,61 +1,81 @@
-import re
-
-def linkify_law_text(text: str) -> str:
-    # 1. Articles with Law Name
-    patterns = [
-        (
-            r'(「?(?:가족관계의\s*등록\s*등에\s*관한\s*법률|가족관계등록법)」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/가족관계의등록등에관한법률/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?(?:가족관계의\s*등록\s*등에\s*관한\s*규칙|가족관계등록규칙)」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/가족관계의등록등에관한규칙/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?민법」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/민법/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?주민등록법」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/주민등록법/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?국제사법」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/국제사법/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?국적법」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/국적법/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(「?비송사건절차법」?)\s*(제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/비송사건절차법/(\2)" target="_blank" class="law-link-badge" title="국가법령정보센터 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 \2 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(?<![가-힣])(법\s*제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/가족관계의등록등에관한법률/(\1)" target="_blank" class="law-link-badge" title="국가법령정보센터 가족관계등록법 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(?<![가-힣])(규칙\s*제\d+(?:조의\d+)?조(?:\s*제\d+항)?)',
-            r'<a href="https://www.law.go.kr/법령/가족관계의등록등에관한규칙/(\1)" target="_blank" class="law-link-badge" title="국가법령정보센터 가족관계등록규칙 바로가기"><i class="fa-solid fa-scale-balanced"></i> \1 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-        (
-            r'(대법원\s*가족관계등록예규\s*제\d+호|예규\s*제\d+호)',
-            r'<a href="https://www.law.go.kr/행정규칙/가족관계의등록등에관한예규" target="_blank" class="law-link-badge directive" title="국가법령정보센터 대법원 행정예규 바로가기"><i class="fa-solid fa-book"></i> \1 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>'
-        ),
-    ]
-
-    result = text
-    for pat, repl in patterns:
-        result = re.sub(pat, repl, result)
-    return result
-
-# Test sample
-sample_text = """
-1. 가족관계의 등록 등에 관한 법률 제18조 제2항에 따라 간이직권정정이 가능합니다.
-2. 규칙 제60조 및 예규 제543호를 확인하세요.
-3. 민법 제844조에 따라 친생추정이 됩니다.
-4. 법 제14조에 따라 형제자매 청구가 제한됩니다.
 """
+대법원 예규/선례 인앱 원문 뷰어 및 스마트 링크 리졸버 검증 테스트
+"""
+import httpx
+import urllib.parse
+from pathlib import Path
 
-print(linkify_law_text(sample_text))
+BASE_URL = "http://127.0.0.1:8000"
+
+def test_directive_626_lookup():
+    """가족관계등록예규 제626호 실시간 원문 및 스마트 링크 검증"""
+    with httpx.Client(base_url=BASE_URL, timeout=10.0) as client:
+        res = client.get("/api/legal/document", params={"query": "가족관계등록예규 제626호"})
+        assert res.status_code == 200, f"Expected 200, got {res.status_code}"
+        data = res.json()
+        assert data["found"] is True, "Document should be found"
+        assert data["id"] == "SCOURT-DIR-626", f"Expected SCOURT-DIR-626, got {data['id']}"
+        assert "혼인신고수리불가신고서" in data["clean_title"]
+        assert len(data["content"]) > 2000, "Content should be full text (>2000 chars)"
+        
+        # 국가법령정보센터 링크에 발령번호가 아닌 실제 규칙 명칭 키워드가 포함되었는지 확인
+        decoded_law_url = urllib.parse.unquote(data["law_go_kr_url"])
+        assert "혼인신고수리불가" in decoded_law_url, f"Expected clean rule title in law url, got {decoded_law_url}"
+        print(f"  [PASS] Directive 626 verified: {data['title'][:40]}... (Content: {len(data['content'])} chars)")
+
+def test_precedent_lookup():
+    """가족관계등록선례 제200805-7호 실시간 원문 및 스마트 링크 검증"""
+    with httpx.Client(base_url=BASE_URL, timeout=10.0) as client:
+        res = client.get("/api/legal/document", params={"query": "가족관계등록선례 제200805-7호"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["found"] is True
+        assert data["id"] == "SCOURT-PREC-200805-7"
+        assert "귀화" in data["clean_title"]
+        assert len(data["content"]) > 500
+        print(f"  [PASS] Precedent 200805-7 verified: {data['title'][:40]}... (Content: {len(data['content'])} chars)")
+
+def test_frontend_assets_integration():
+    """프론트엔드 모달 UI 및 인앱 뷰어 자산 통합 검증"""
+    index_path = Path("frontend/index.html")
+    app_js_path = Path("frontend/app.js")
+    style_path = Path("frontend/style.css")
+
+    with open(index_path, encoding="utf-8") as f:
+        html = f.read()
+    assert 'id="legalDocModal"' in html, "legalDocModal markup missing in index.html"
+    assert 'app.js?v=5.3.1' in html, "app.js cache busting v5.3.1 missing"
+
+    with open(app_js_path, encoding="utf-8") as f:
+        js = f.read()
+    assert "openLegalDocModal" in js, "openLegalDocModal missing in app.js"
+    assert "in-app-viewer" in js, "in-app-viewer class missing in app.js"
+    assert "국내입양에관한특별법" in js, "국내입양에관한특별법 canonical logic missing in app.js"
+    assert "국제입양에관한법률" in js, "국제입양에관한법률 canonical logic missing in app.js"
+
+    with open(style_path, encoding="utf-8") as f:
+        css = f.read()
+    assert ".legal-doc-modal-card" in css, "legal-doc-modal-card styles missing in style.css"
+    assert '[data-theme="light"] .legal-doc-modal-card' in css, "Light theme styles missing in style.css"
+    print("  [PASS] Frontend modal, styles, and event handlers verified.")
+
+def test_special_adoption_laws_linking_with_node():
+    """Node.js 환경에서 사용자의 실제 발화(국내입양특별법, 국제입양법 연속 조문) 파싱 무결성 검증"""
+    import subprocess
+    cmd = ["node", "tests/test_law_regex.js"]
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    assert res.returncode == 0, f"Node execution failed: {res.stderr}"
+    out = urllib.parse.unquote(res.stdout)
+    assert "국내입양에관한특별법/제21조" in out
+    assert "국제입양에관한법률/제12조" in out
+    assert "국제입양에관한법률/제22조" in out
+    assert "국제입양에관한법률/제23조" in out
+    print("  [PASS] Adoption special laws (국내/국제입양) and consecutive articles linkified perfectly.")
+
+if __name__ == "__main__":
+    print("=== [Testing Supreme Court Legal Doc In-App Viewer & Smart Linker] ===")
+    test_directive_626_lookup()
+    test_precedent_lookup()
+    test_frontend_assets_integration()
+    test_special_adoption_laws_linking_with_node()
+    print("\n[SUCCESS] ALL LEGAL DOC & ADOPTION LAW TESTS PASSED! (100%)")

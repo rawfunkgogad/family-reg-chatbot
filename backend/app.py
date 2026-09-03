@@ -4,6 +4,8 @@ import json
 import time
 import hashlib
 import secrets
+import re
+import urllib.parse
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -142,6 +144,100 @@ def load_kb_data():
 @app.get("/api/kb")
 async def get_kb():
     return load_kb_data()
+
+@app.get("/api/legal/document")
+async def get_legal_document(query: str = ""):
+    """대법원 예규/선례/법령 조문 실시간 원문 및 스마트 링크 조회 API"""
+    if not query:
+        raise HTTPException(status_code=400, detail="Query parameter is required")
+
+    q_clean = query.strip()
+    corpus = rag_service.corpus
+    found_doc = None
+
+    # 1. Direct ID match
+    for d in corpus:
+        if d.get("id") == q_clean:
+            found_doc = d
+            break
+
+    # 2. Number extraction for Directives (예규) and Precedents (선례)
+    if not found_doc:
+        dir_match = re.search(r'(?:예규\s*제?|DIR-?)(\d+)', q_clean)
+        prec_match = re.search(r'(?:선례\s*제?|PREC-?)([\d\-]+)', q_clean)
+
+        if dir_match:
+            dir_no = dir_match.group(1)
+            target_id = f"SCOURT-DIR-{dir_no}"
+            for d in corpus:
+                if d.get("id") == target_id or (d.get("category") == "가족관계등록예규" and f"제{dir_no}호" in d.get("title", "")):
+                    found_doc = d
+                    break
+
+        if not found_doc and prec_match:
+            prec_no = prec_match.group(1)
+            target_id = f"SCOURT-PREC-{prec_no}"
+            for d in corpus:
+                if d.get("id") == target_id or (d.get("category") == "가족관계등록선례" and prec_no in d.get("title", "")):
+                    found_doc = d
+                    break
+
+    # 3. Pure digit query
+    if not found_doc and q_clean.isdigit():
+        target_id = f"SCOURT-DIR-{q_clean}"
+        for d in corpus:
+            if d.get("id") == target_id:
+                found_doc = d
+                break
+
+    # 4. Search in titles
+    if not found_doc:
+        for d in corpus:
+            if q_clean in d.get("title", ""):
+                found_doc = d
+                break
+
+    if not found_doc:
+        return {
+            "found": False,
+            "query": query,
+            "message": "해당 예규 또는 선례 원문을 찾을 수 없습니다."
+        }
+
+    title = found_doc.get("title", "")
+    category = found_doc.get("category", "")
+    content = found_doc.get("content", "")
+    source = found_doc.get("source", "")
+    doc_id = found_doc.get("id", "")
+
+    # Clean title without bracket prefix e.g. "[가족관계등록예규 제626호] "
+    clean_title = re.sub(r'^\[.*?\]\s*', '', title).strip()
+
+    # Smart law.go.kr URL using the actual rule/precedent title keyword
+    search_keyword = clean_title.split()[0] if clean_title else q_clean
+    if len(clean_title) >= 6:
+        search_keyword = clean_title[:20].strip()
+
+    import urllib.parse
+    if category == "가족관계등록선례":
+        law_go_kr_url = f"https://www.law.go.kr/LSW/precSc.do?menuId=1&subMenuId=15&tabNo=0&query={urllib.parse.quote(search_keyword)}"
+    else:
+        law_go_kr_url = f"https://www.law.go.kr/LSW/admRulSc.do?menuId=5&subMenuId=41&tabNo=0&query={urllib.parse.quote(search_keyword)}"
+
+    scourt_url = "https://portal.scourt.go.kr/pgp/index.on?m=PGP1051M01&l=N&c=900"
+
+    return {
+        "found": True,
+        "id": doc_id,
+        "title": title,
+        "clean_title": clean_title,
+        "category": category,
+        "source": source,
+        "content": content,
+        "law_go_kr_url": law_go_kr_url,
+        "scourt_url": scourt_url,
+        "search_keyword": search_keyword
+    }
 
 @app.get("/api/quick-cases")
 async def get_quick_cases():

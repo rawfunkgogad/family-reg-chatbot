@@ -595,14 +595,32 @@ function linkifyLawReferences(html) {
   if (!html) return "";
 
   function getLawCanonicalName(raw) {
-    const clean = raw.replace(/[「」\s]/g, "");
-    if (clean.includes("규칙")) return "가족관계의등록등에관한규칙";
-    if (clean.includes("민법")) return "민법";
-    if (clean.includes("주민등록")) return "주민등록법";
-    if (clean.includes("국제사법")) return "국제사법";
-    if (clean.includes("국적법")) return "국적법";
-    if (clean.includes("비송")) return "비송사건절차법";
-    return "가족관계의등록등에관한법률";
+    if (!raw) return "가족관계의등록등에관한법률";
+    const clean = raw.replace(/[「」]/g, "").trim();
+    const noSpace = clean.replace(/\s+/g, "");
+
+    if (clean === "법" || noSpace === "가족관계등록법" || noSpace === "가족관계의등록등에관한법률") {
+      return "가족관계의등록등에관한법률";
+    }
+    if (clean === "규칙" || noSpace === "가족관계등록규칙" || noSpace === "가족관계의등록등에관한규칙") {
+      return "가족관계의등록등에관한규칙";
+    }
+    if (noSpace === "국내입양에관한특별법" || noSpace === "국내입양특별법") {
+      return "국내입양에관한특별법";
+    }
+    if (noSpace === "국제입양에관한법률" || noSpace === "국제입양법") {
+      return "국제입양에관한법률";
+    }
+    if (noSpace === "민법") return "민법";
+    if (noSpace === "주민등록법") return "주민등록법";
+    if (noSpace === "국제사법") return "국제사법";
+    if (noSpace === "국적법") return "국적법";
+    if (noSpace === "비송사건절차법") return "비송사건절차법";
+    if (noSpace === "가사소송법") return "가사소송법";
+    if (noSpace === "가사소송규칙") return "가사소송규칙";
+    if (noSpace === "입양특례법") return "입양특례법";
+    
+    return noSpace;
   }
 
   function buildArticleLink(lawName, fullText, articleNum) {
@@ -615,15 +633,17 @@ function linkifyLawReferences(html) {
 
   // 1. Compound Law & Consecutive Articles
   // Matches:
+  // - 「국내입양에 관한 특별법」 제21조
+  // - 「국제입양에 관한 법률」 제12조, 제22조제4항, 제23조
   // - 「가족관계의 등록 등에 관한 법률」 제14조의2(인터넷에 의한 증명서 발급)
-  // - 「가족관계의 등록 등에 관한 법률」 제14조, 제14조의2, 제15조 및 제18조 제2항
   // - 법 제14조의2 제1항 및 제18조
   // - 「가족관계의 등록 등에 관한 규칙」 제19조 내지 제22조
   // - 민법 제844조(남편의 친생자의 추정)
-  const lawCompoundPattern = /(「?(가족관계의\s*등록\s*등에\s*관한\s*법률|가족관계등록법|가족관계의\s*등록\s*등에\s*관한\s*규칙|가족관계등록규칙|민법|주민등록법|국제사법|국적법|비송사건절차법)」?|(?<=(?:^|[^\w가-힣]))법|(?<=(?:^|[^\w가-힣]))규칙)\s*(제\d+조(?:의\d+)?(?:\s*\([^)\n]+\))?(?:\s*제\d+항)?(?:\s*제\d+호)?(?:\s*(?:,|및|와|과|내지|~|-)\s*제\d+조(?:의\d+)?(?:\s*\([^)\n]+\))?(?:\s*제\d+항)?(?:\s*제\d+호)?)*)/g;
+  const lawCompoundPattern = /(「([^」\n]+)」|(가족관계의\s*등록\s*등에\s*관한\s*법률|가족관계등록법|가족관계의\s*등록\s*등에\s*관한\s*규칙|가족관계등록규칙|국내입양에\s*관한\s*특별법|국내입양특별법|국제입양에\s*관한\s*법률|국제입양법|입양특례법|가사소송법|가사소송규칙|민법|주민등록법|국제사법|국적법|비송사건절차법|(?<=(?:^|[^\w가-힣]))법|(?<=(?:^|[^\w가-힣]))규칙))\s*(제\d+조(?:의\d+)?(?:\s*\([^)\n]+\))?(?:\s*제\d+항)?(?:\s*제\d+호)?(?:\s*(?:,|및|와|과|내지|~|-)\s*제\d+조(?:의\d+)?(?:\s*\([^)\n]+\))?(?:\s*제\d+항)?(?:\s*제\d+호)?)*)/g;
 
-  let out = html.replace(lawCompoundPattern, (match, lawPrefix, _, articlesSequence) => {
-    const canonLaw = getLawCanonicalName(lawPrefix);
+  let out = html.replace(lawCompoundPattern, (match, quotedLaw, innerQuoted, unquotedLaw, articlesSequence) => {
+    const rawLawName = innerQuoted || unquotedLaw;
+    const canonLaw = getLawCanonicalName(rawLawName);
     
     // Replace each individual article inside the sequence
     const articleItemPattern = /(제\d+조(?:의\d+)?(?:\s*\([^)\n]+\))?(?:\s*제\d+항)?(?:\s*제\d+호)?)/g;
@@ -633,8 +653,8 @@ function linkifyLawReferences(html) {
       return buildArticleLink(canonLaw, artMatch, artNum);
     });
 
-    const isShortForm = lawPrefix === "법" || lawPrefix === "규칙";
-    const prefixDisplay = isShortForm ? `<span class="law-prefix-tag">${lawPrefix}</span>` : `<span class="law-name-tag">${lawPrefix}</span>`;
+    const isShortForm = rawLawName === "법" || rawLawName === "규칙";
+    const prefixDisplay = isShortForm ? `<span class="law-prefix-tag">${rawLawName}</span>` : `<span class="law-name-tag">${quotedLaw || rawLawName}</span>`;
     return `${prefixDisplay} ${linkedSequence}`;
   });
 
@@ -643,8 +663,7 @@ function linkifyLawReferences(html) {
     /(대법원\s*)?(가족관계등록예규\s*제\d+호|예규\s*제\d+호)/g,
     (match) => {
       const query = match.replace(/대법원\s*/, '').trim();
-      const url = `https://www.law.go.kr/LSW/admRulSc.do?menuId=5&subMenuId=41&tabNo=0&query=${encodeURIComponent(query)}`;
-      return `<a href="${url}" target="_blank" class="law-link-badge directive" title="국가법령정보센터 행정예규 검색 바로가기"><i class="fa-solid fa-book"></i> ${match} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>`;
+      return `<a href="javascript:void(0)" onclick="openLegalDocModal('${query}')" class="law-link-badge directive in-app-viewer" title="대법원 예규 원문 전문 및 스마트 링크 열람"><i class="fa-solid fa-book"></i> ${match} <i class="fa-solid fa-file-lines" style="font-size: 9.5px; margin-left: 2px;"></i></a>`;
     }
   );
 
@@ -653,8 +672,7 @@ function linkifyLawReferences(html) {
     /(대법원\s*)?(등록선례\s*제?[\w\-]+호?|선례\s*제?[\w\-]+)/g,
     (match) => {
       const query = match.replace(/대법원\s*/, '').trim();
-      const url = `https://www.law.go.kr/LSW/precSc.do?menuId=1&subMenuId=15&tabNo=0&query=${encodeURIComponent(query)}`;
-      return `<a href="${url}" target="_blank" class="law-link-badge civil" title="국가법령정보센터 판례/선례 검색 바로가기"><i class="fa-solid fa-gavel"></i> ${match} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>`;
+      return `<a href="javascript:void(0)" onclick="openLegalDocModal('${query}')" class="law-link-badge civil in-app-viewer" title="대법원 선례 원문 전문 및 스마트 링크 열람"><i class="fa-solid fa-gavel"></i> ${match} <i class="fa-solid fa-file-lines" style="font-size: 9.5px; margin-left: 2px;"></i></a>`;
     }
   );
 
@@ -820,4 +838,111 @@ function setStreamingState(streaming) {
     stopBtn.style.display = "none";
   }
 }
+
+// =============================================================================
+// Supreme Court Directives & Precedents In-App Viewer Modal Logic
+// =============================================================================
+async function openLegalDocModal(targetQuery) {
+  const modal = document.getElementById("legalDocModal");
+  if (!modal) return;
+
+  const titleEl = document.getElementById("legalDocTitle");
+  const categoryEl = document.getElementById("legalDocCategory");
+  const sourceEl = document.getElementById("legalDocSource");
+  const idEl = document.getElementById("legalDocId");
+  const contentEl = document.getElementById("legalDocContent");
+  const scourtLinkEl = document.getElementById("linkScourtPortal");
+  const lawLinkEl = document.getElementById("linkLawGoKr");
+  const iconEl = document.getElementById("legalDocIcon");
+
+  // Initial loading state
+  modal.style.display = "flex";
+  titleEl.textContent = `${targetQuery} 원문 로딩 중...`;
+  contentEl.textContent = "대법원 사법정보 코퍼스에서 원문을 조회하고 있습니다...";
+  
+  const isPrecedent = targetQuery.includes("선례");
+  categoryEl.textContent = isPrecedent ? "대법원 가족관계등록선례" : "대법원 가족관계등록예규";
+  categoryEl.className = isPrecedent ? "legal-doc-badge precedent" : "legal-doc-badge";
+  iconEl.className = isPrecedent ? "fa-solid fa-gavel" : "fa-solid fa-scale-balanced";
+
+  try {
+    const res = await fetch(`/api/legal/document?query=${encodeURIComponent(targetQuery)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.found) {
+      titleEl.textContent = data.title || targetQuery;
+      categoryEl.textContent = data.category || (isPrecedent ? "대법원 가족관계등록선례" : "대법원 가족관계등록예규");
+      categoryEl.className = data.category.includes("선례") ? "legal-doc-badge precedent" : "legal-doc-badge";
+      iconEl.className = data.category.includes("선례") ? "fa-solid fa-gavel" : "fa-solid fa-scale-balanced";
+      sourceEl.textContent = `출처: ${data.source || '대한민국 법원'}`;
+      idEl.textContent = data.id || '';
+      contentEl.textContent = data.content || '등록된 본문 내용이 없습니다.';
+
+      // Smart Links
+      if (data.law_go_kr_url) {
+        lawLinkEl.href = data.law_go_kr_url;
+        lawLinkEl.style.display = "inline-flex";
+        lawLinkEl.title = `국가법령정보센터 (${data.search_keyword || '본문'}) 검색 바로가기`;
+      } else {
+        lawLinkEl.style.display = "none";
+      }
+
+      if (data.scourt_url) {
+        scourtLinkEl.href = data.scourt_url;
+        scourtLinkEl.style.display = "inline-flex";
+      } else {
+        scourtLinkEl.style.display = "none";
+      }
+    } else {
+      titleEl.textContent = targetQuery;
+      contentEl.textContent = data.message || "해당 예규 또는 선례 원문을 찾을 수 없습니다.";
+      lawLinkEl.href = `https://www.law.go.kr/LSW/admRulSc.do?menuId=5&subMenuId=41&tabNo=2&query=${encodeURIComponent(targetQuery)}`;
+      lawLinkEl.style.display = "inline-flex";
+      scourtLinkEl.href = "https://portal.scourt.go.kr/pgp/index.on?m=PGP1051M01&l=N&c=900";
+      scourtLinkEl.style.display = "inline-flex";
+    }
+  } catch (err) {
+    titleEl.textContent = targetQuery;
+    contentEl.textContent = `원문 조회 중 오류가 발생했습니다: ${err.message}`;
+  }
+}
+window.openLegalDocModal = openLegalDocModal;
+
+// Modal Close & Copy Listeners
+document.addEventListener("DOMContentLoaded", () => {
+  const modal = document.getElementById("legalDocModal");
+  const btnClose = document.getElementById("btnCloseLegalDocModal");
+  const btnCloseBottom = document.getElementById("btnCloseLegalDocBottom");
+  const btnCopy = document.getElementById("btnCopyLegalDocText");
+  const contentEl = document.getElementById("legalDocContent");
+
+  if (btnClose) btnClose.addEventListener("click", () => { if (modal) modal.style.display = "none"; });
+  if (btnCloseBottom) btnCloseBottom.addEventListener("click", () => { if (modal) modal.style.display = "none"; });
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.style.display = "none";
+    });
+  }
+
+  if (btnCopy) {
+    btnCopy.addEventListener("click", async () => {
+      if (!contentEl) return;
+      try {
+        await navigator.clipboard.writeText(contentEl.textContent);
+        const originalHtml = btnCopy.innerHTML;
+        btnCopy.innerHTML = '<i class="fa-solid fa-check"></i> <span>복사 완료!</span>';
+        btnCopy.style.borderColor = "#22c55e";
+        btnCopy.style.color = "#22c55e";
+        setTimeout(() => {
+          btnCopy.innerHTML = originalHtml;
+          btnCopy.style.borderColor = "";
+          btnCopy.style.color = "";
+        }, 2000);
+      } catch (err) {
+        alert("클립보드 복사에 실패했습니다.");
+      }
+    });
+  }
+});
 
