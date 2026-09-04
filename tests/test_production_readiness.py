@@ -28,7 +28,7 @@ def test_admin_auth_and_master_corpus_count(client):
     docs_res = client.get("/api/admin/documents", headers=headers)
     assert docs_res.status_code == 200
     docs = docs_res.json()["documents"]
-    assert len(docs) == 468, f"Expected 468 documents in master corpus, got {len(docs)}"
+    assert len(docs) >= 468, f"Expected at least 468 documents in master corpus, got {len(docs)}"
 
     # 카테고리별 분포 무결성 검증
     categories = [d.get("category") for d in docs]
@@ -46,8 +46,8 @@ def test_cached_vector_embeddings_integrity():
     with open(meta_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
-    assert emb.shape == (468, 1024), f"Embeddings shape should be (468, 1024), got {emb.shape}"
-    assert len(meta) == 468, f"Metadata count should be 468, got {len(meta)}"
+    assert emb.shape == (len(meta), 1024), f"Embeddings shape should match metadata count ({len(meta)}, 1024), got {emb.shape}"
+    assert len(meta) >= 468, f"Metadata count should be at least 468, got {len(meta)}"
 
 def test_rag_search_scourt_precedents(client):
     """대법원 가족관계등록선례 실시간 RAG 질의 및 인용 응답 검증"""

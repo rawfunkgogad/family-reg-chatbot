@@ -1,0 +1,17 @@
+{
+  "crawled_at": "2026-09-05 07:48:31",
+  "total_rules": 200,
+  "total_precedents": 78,
+  "files": {
+    "rules": "family_rules.json",
+    "precedents": "family_precedents.json"
+  },
+  "sample_rule": {
+    "title": "인명용 한자의 제한과 관련된 가족관계등록사무 처리지침",
+    "data_no": "111"
+  },
+  "sample_precedent": {
+    "title": "외국에서의 출생(사망)연월일은 기재되어 있으나 그 현지시각이 기재되어 있지 아니한 외국 발행의 출생(사망)증명서를 첨부한 출생 또는 사망신고서의 수리여부",
+    "data_no": "200801-1"
+  }
+}

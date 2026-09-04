@@ -30,6 +30,10 @@ const tabChunksCount = document.getElementById("tabChunksCount");
 const btnRefreshAdmin = document.getElementById("btnRefreshAdmin");
 const btnResetDefault = document.getElementById("btnResetDefault");
 const btnClearAll = document.getElementById("btnClearAll");
+const btnTriggerSync = document.getElementById("btnTriggerSync");
+const syncLastTime = document.getElementById("syncLastTime");
+const syncNextTime = document.getElementById("syncNextTime");
+const syncCurrentStage = document.getElementById("syncCurrentStage");
 const modalTabs = document.querySelectorAll(".modal-tab");
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("fileInput");
@@ -193,6 +197,7 @@ function initAuthFlow() {
           loadMetricsStats();
           loadSecurityStats();
           loadQueryLogs(1, "");
+          loadSyncStatus();
         } else {
           showLoginAlert(data.detail || "인증코드가 올바르지 않습니다.");
           authCodeInput.focus();
@@ -232,6 +237,7 @@ async function verifySession() {
       loadMetricsStats();
       loadSecurityStats();
       loadQueryLogs(1, "");
+      loadSyncStatus();
     }
   } catch (err) {
     showAuthView();
@@ -475,6 +481,7 @@ function setupDashboardEvents() {
       loadMetricsStats();
       loadSecurityStats();
       loadQueryLogs(1, currentLogSearch);
+      loadSyncStatus();
     });
   }
 
@@ -2106,4 +2113,92 @@ if (btnImportLogs && logImportFileInput) {
     }
   });
 }
+
+// ==========================================
+// 지식 코퍼스 실시간 현행화 (Live Corpus Sync) 관리
+// ==========================================
+
+async function loadSyncStatus() {
+  try {
+    const res = await fetch('/api/admin/corpus/sync/status');
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (syncLastTime) syncLastTime.textContent = data.last_synced_at || '동기화 이력 없음';
+    if (syncNextTime) syncNextTime.textContent = data.next_scheduled_sync || '매일 00:00 KST';
+    if (syncCurrentStage) {
+      syncCurrentStage.textContent = data.current_stage || (data.is_running ? '수집 및 동기화 진행 중...' : '대기 중');
+      if (data.is_running) {
+        syncCurrentStage.style.color = '#f59e0b';
+      } else if (data.last_error) {
+        syncCurrentStage.style.color = '#ef4444';
+      } else {
+        syncCurrentStage.style.color = '#38bdf8';
+      }
+    }
+    if (btnTriggerSync) {
+      if (data.is_running) {
+        btnTriggerSync.disabled = true;
+        btnTriggerSync.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>현행화 진행 중...</span>';
+      } else {
+        btnTriggerSync.disabled = false;
+        btnTriggerSync.innerHTML = '<i class="fa-solid fa-rotate"></i> <span>지금 즉시 현행화</span>';
+      }
+    }
+    return data;
+  } catch (err) {
+    console.error('Failed to load sync status:', err);
+    return null;
+  }
+}
+
+let syncPollTimer = null;
+
+async function triggerCorpusSync() {
+  if (!confirm('대법원 사법정보공개포털(예규·선례) 및 국가법령정보 법령체계도를 실시간 수집하여 지식 코퍼스를 즉시 현행화하시겠습니까?')) return;
+  
+  if (btnTriggerSync) {
+    btnTriggerSync.disabled = true;
+    btnTriggerSync.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>현행화 시작 중...</span>';
+  }
+  
+  try {
+    const res = await authFetch('/api/admin/corpus/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_crawlers: true })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(data.message || '지식 코퍼스 현행화가 시작되었습니다.');
+      loadSyncStatus();
+      
+      if (syncPollTimer) clearInterval(syncPollTimer);
+      syncPollTimer = setInterval(async () => {
+        const st = await loadSyncStatus();
+        if (st && !st.is_running) {
+          clearInterval(syncPollTimer);
+          syncPollTimer = null;
+          loadAdminFiles();
+          loadAdminDocuments();
+          if (st.last_error) {
+            alert(`⚠️ 현행화 중 오류가 발생했습니다: ${st.last_error}`);
+          } else {
+            alert(`✅ 지식 코퍼스 현행화가 성공적으로 완료되었습니다! (총 ${st.last_counts?.total_docs || 0}건)`);
+          }
+        }
+      }, 2500);
+    } else {
+      alert(`현행화 시작 실패: ${data.message || '오류가 발생했습니다.'}`);
+      loadSyncStatus();
+    }
+  } catch (err) {
+    alert(`현행화 요청 중 오류: ${err.message}`);
+    loadSyncStatus();
+  }
+}
+
+if (btnTriggerSync) {
+  btnTriggerSync.addEventListener('click', triggerCorpusSync);
+}
+
 

@@ -25,6 +25,8 @@ from optimization.cache_manager import cache_manager
 from optimization.metrics_collector import metrics_collector
 from optimization.query_logger import query_logger
 from security.input_filter import input_filter
+from sync.corpus_sync_manager import corpus_sync_manager
+from sync.scheduler import start_daily_midnight_scheduler
 
 # --- 관리자 보안 인증 체계 (Salted SHA-256 Hashing & Session Token) ---
 ADMIN_SALT = "scourt_family_reg_admin_2026_salt"
@@ -46,12 +48,26 @@ async def verify_admin_token(credentials: Optional[HTTPAuthorizationCredentials]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize RAG vector cache on startup
+    # 1. 크롤러 산출물 기반 기본 지식 코퍼스 무결성 검증 및 확보
+    print("[Server] Ensuring default knowledge corpus from crawlers...")
+    try:
+        await corpus_sync_manager.ensure_default_knowledge()
+    except Exception as e:
+        print(f"[Server] Warning during ensure_default_knowledge: {e}")
+
+    # 2. RAG 벡터 캐시 인덱스 초기화
     print("[Server] Initializing RAG vector cache on startup...")
     try:
         await rag_service.initialize()
     except Exception as e:
         print(f"[Server] Failed to initialize RAG on startup: {e}")
+
+    # 3. 매일 00:00 KST 자동 현행화 백그라운드 스케줄러 가동
+    try:
+        start_daily_midnight_scheduler()
+    except Exception as e:
+        print(f"[Server] Failed to start daily midnight scheduler: {e}")
+
     yield
     # Shutdown
 
@@ -530,6 +546,38 @@ async def import_admin_corpus(file: UploadFile = File(...), token: str = Depends
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"지식 복원 처리 중 오류 발생: {str(e)}")
+
+# --- 지식 코퍼스 실시간 현행화 (대법원·국가법령 수집기 연동 & 00시/수동 동기화) API ---
+
+@app.get("/api/admin/corpus/sync/status")
+async def get_corpus_sync_status():
+    """현재 지식 코퍼스 동기화 상태, 다음 자정(00:00 KST) 예정 시각 및 최근 통계 반환"""
+    return corpus_sync_manager.get_status()
+
+class SyncTriggerRequest(BaseModel):
+    run_crawlers: Optional[bool] = True
+
+@app.post("/api/admin/corpus/sync")
+async def trigger_corpus_sync(
+    req: Optional[SyncTriggerRequest] = None,
+    token: str = Depends(verify_admin_token)
+):
+    """관리자 수동 지식 코퍼스 현행화 트리거 (백그라운드 비동기 실행)"""
+    if corpus_sync_manager.is_running:
+        return {
+            "success": False,
+            "message": "이미 지식 코퍼스 현행화 작업이 진행 중입니다.",
+            "status": corpus_sync_manager.get_status()
+        }
+    
+    run_crawlers = req.run_crawlers if req is not None else True
+    # 백그라운드 태스크로 안전하게 비동기 실행
+    asyncio.create_task(corpus_sync_manager.sync(run_crawlers=run_crawlers))
+    return {
+        "success": True,
+        "message": "지식 코퍼스 현행화(대법원 예규·선례 및 법령체계도 수집·임베딩 갱신)가 시작되었습니다.",
+        "status": corpus_sync_manager.get_status()
+    }
 
 @app.post("/api/admin/upload")
 async def upload_document(

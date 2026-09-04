@@ -107,7 +107,11 @@ class RAGService:
             body = f"{body}\n...(후속문맥: {next_hint})..."
             
         parts.append(body)
-        return "\n".join(parts)
+        full_text = "\n".join(parts)
+        # BGE-M3 모델 컨텍스트 한도(8192 토큰) 초과 방지를 위해 최대 3500자로 안전하게 제한
+        if len(full_text) > 3500:
+            full_text = full_text[:3500]
+        return full_text
 
     async def _generate_and_save_corpus_embeddings(self):
         """전체 지식 코퍼스에 대해 bge-m3 임베딩 비동기 병렬 생성 후 로컬 저장"""

@@ -578,6 +578,139 @@
       box-sizing: border-box;
     }
 
+    /* Corpus Live Sync Card */
+    .corpus-sync-card {
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    }
+
+    [data-theme="light"] .corpus-sync-card {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .sync-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .sync-card-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sync-card-title i {
+      font-size: 22px;
+      color: #38bdf8;
+    }
+
+    .sync-card-title h4 {
+      margin: 0 0 3px 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .sync-card-title p {
+      margin: 0;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    .sync-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .sync-schedule-badge {
+      font-size: 11.5px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 4px 10px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 600;
+    }
+
+    [data-theme="light"] .sync-schedule-badge {
+      background: #ecfdf5;
+      color: #059669;
+      border-color: #a7f3d0;
+    }
+
+    .btn-sync-trigger {
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: #ffffff;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+    }
+
+    .btn-sync-trigger:hover:not(:disabled) {
+      background: linear-gradient(135deg, #0369a1 0%, #075985 100%);
+      transform: translateY(-1px);
+    }
+
+    .btn-sync-trigger:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .sync-status-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding-top: 6px;
+      border-top: 1px dashed rgba(255, 255, 255, 0.1);
+      flex-wrap: wrap;
+      font-size: 12px;
+    }
+
+    [data-theme="light"] .sync-status-row {
+      border-top-color: #e2e8f0;
+    }
+
+    .sync-status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sync-item-label {
+      color: var(--text-secondary);
+    }
+
+    .sync-item-val {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
     .doc-view-toolbar {
       flex-shrink: 0;
       display: flex;
@@ -3162,6 +3295,41 @@
           <button id="btnClearAll" class="btn-stat-action btn-danger-clear" title="모든 커스텀 및 기본 지식 삭제">
             <i class="fa-solid fa-trash-can"></i> 전체 비우기
           </button>
+        </div>
+      </div>
+
+      <!-- Live Crawler & Legal Hierarchy Sync Banner -->
+      <div class="corpus-sync-card" id="corpusSyncCard">
+        <div class="sync-card-header">
+          <div class="sync-card-title">
+            <i class="fa-solid fa-cloud-arrow-down"></i>
+            <div>
+              <h4>대법원 사법정보공개포털 & 국가법령정보 법령체계도 실시간 현행화</h4>
+              <p>매일 00:00 KST에 대법원 예규(200건), 선례(78건), 법령체계도(모법·규칙·위임예규·특례법)를 자동 수집·현행화하며, 필요시 즉시 수동 현행화할 수 있습니다.</p>
+            </div>
+          </div>
+          <div class="sync-actions">
+            <span class="sync-schedule-badge" id="syncScheduleBadge">
+              <i class="fa-solid fa-clock"></i> 매일 00:00 KST 자동 실행
+            </span>
+            <button type="button" id="btnTriggerSync" class="btn-sync-trigger">
+              <i class="fa-solid fa-rotate"></i> <span>지금 즉시 현행화</span>
+            </button>
+          </div>
+        </div>
+        <div class="sync-status-row" id="syncStatusRow">
+          <div class="sync-status-item">
+            <span class="sync-item-label">최근 현행화:</span>
+            <span class="sync-item-val" id="syncLastTime">-</span>
+          </div>
+          <div class="sync-status-item">
+            <span class="sync-item-label">다음 자동 현행화:</span>
+            <span class="sync-item-val" id="syncNextTime">-</span>
+          </div>
+          <div class="sync-status-item">
+            <span class="sync-item-label">현재 상태:</span>
+            <span class="sync-item-val" id="syncCurrentStage" style="color: #38bdf8;">대기 중</span>
+          </div>
         </div>
       </div>
 
