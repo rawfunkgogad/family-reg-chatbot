@@ -124,8 +124,16 @@ class InputFilter:
                 }
 
         # 2. 비속어 및 욕설 탐지
+        # 행정/법률 문맥의 합법적 문법 표현 ('[행정행위/명사] 시 + 발[급/생/송/행/견/효/령...]') 오탐 방지 보호
+        # 예: '발급 시 발급', '신고 시 발생', '제출 시 발행', '통지 시 발송', '신청 시 발견' 등
+        sanitized_for_check = re.sub(r'([가-힣]+)\s*시\s+(발[가-힣]+)', r'\1_시_\2', text)
+        
+        # 합법적인 한자어 표준 어휘 보호 (예: 시발점, 시발역)
+        for safe_word in ["시발점", "시발역"]:
+            sanitized_for_check = sanitized_for_check.replace(safe_word, "[SAFE_PHRASE]")
+
         # 공백 제거 텍스트로도 검사하여 자모 분리나 띄어쓰기 우회 방지
-        compact_text = text.replace(" ", "").lower()
+        compact_text = sanitized_for_check.replace(" ", "").lower()
         for bad_word in PROFANITY_KEYWORDS:
             if bad_word in compact_text:
                 self.stats["inappropriate_blocked_count"] += 1

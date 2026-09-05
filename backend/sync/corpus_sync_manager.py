@@ -109,7 +109,7 @@ class CorpusSyncManager:
         env["PYTHONUTF8"] = "1"
 
         # 1. 국가법령정보 법령체계도 수집 (run_law_hierarchy.py)
-        self.current_stage = "1/2: 국가법령정보 법령체계도(모법·규칙·위임예규·특례법) 수집 중..."
+        self.current_stage = "1/3: 국가법령정보 법령체계도(모법·규칙·위임예규·특례법) 수집 중..."
         print(f"[SyncManager] {self.current_stage}")
         
         proc1 = await asyncio.create_subprocess_exec(
@@ -125,7 +125,7 @@ class CorpusSyncManager:
             print(f"[SyncManager] Warning: run_law_hierarchy exited with code {proc1.returncode}: {err_msg[:200]}")
 
         # 2. 대법원 사법정보공개포털 예규·선례 수집 (run_crawler.py)
-        self.current_stage = "2/2: 대법원 사법정보공개포털(예규 200건·선례 78건) 수집 중..."
+        self.current_stage = "2/3: 대법원 사법정보공개포털(예규 200건·선례 78건) 수집 중..."
         print(f"[SyncManager] {self.current_stage}")
         
         proc2 = await asyncio.create_subprocess_exec(
@@ -139,6 +139,23 @@ class CorpusSyncManager:
         if proc2.returncode != 0:
             err_msg = stderr2.decode("utf-8", errors="ignore")
             print(f"[SyncManager] Warning: run_crawler exited with code {proc2.returncode}: {err_msg[:200]}")
+
+        # 3. 대법원 전자가족관계등록시스템 고객센터(FAQ·가이드·서식) 수집 (efamily_guide_crawler.py)
+        self.current_stage = "3/3: 전자가족관계등록시스템 고객센터(FAQ 112건·가이드 3건·서식 46건) 수집 중..."
+        print(f"[SyncManager] {self.current_stage}")
+        
+        crawler_script = self.backend_dir / "crawler" / "efamily_guide_crawler.py"
+        proc3 = await asyncio.create_subprocess_exec(
+            sys.executable, "-X", "utf8", str(crawler_script),
+            cwd=str(self.backend_dir),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout3, stderr3 = await proc3.communicate()
+        if proc3.returncode != 0:
+            err_msg = stderr3.decode("utf-8", errors="ignore")
+            print(f"[SyncManager] Warning: efamily_guide_crawler exited with code {proc3.returncode}: {err_msg[:200]}")
 
         return {"status": "crawlers_finished"}
 
@@ -304,6 +321,35 @@ class CorpusSyncManager:
 
         return docs
 
+    def normalize_efamily_customer_center(self, efamily_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """efamily_customer_center.json (FAQ 112건, 가이드 3건, 신청서식 46건) 정규화"""
+        docs = []
+        raw_docs = efamily_data.get("documents", [])
+        for d in raw_docs:
+            doc_id = d.get("id")
+            title = d.get("title")
+            cat = d.get("category", "전자가족관계등록 FAQ")
+            src = d.get("source", "대법원 전자가족관계등록시스템 고객센터")
+            content = d.get("content", "")
+            
+            docs.append({
+                "id": doc_id,
+                "title": title,
+                "category": cat,
+                "source": src,
+                "content": content,
+                "created_at": int(time.time()),
+                "file_name": "efamily_customer_center.json",
+                "metadata": {
+                    "item_type": cat,
+                    "registered_date": d.get("registered_date", ""),
+                    "service_name": d.get("service_name", ""),
+                    "file_names": d.get("file_names", []),
+                    "url": d.get("url", "")
+                }
+            })
+        return docs
+
     def build_integrated_corpus(self) -> List[Dict[str, Any]]:
         """
         output 디렉토리의 크롤링 파일들과 기존 포털 지식을 결합하여 전체 마스터 코퍼스 빌드
@@ -317,6 +363,7 @@ class CorpusSyncManager:
         rules_count = 0
         prec_count = 0
         hier_count = 0
+        efamily_cc_count = 0
 
         # 1. 예규 로드
         if rules_file.exists():
@@ -351,7 +398,22 @@ class CorpusSyncManager:
             except Exception as e:
                 print(f"[SyncManager] Error loading law hierarchy: {e}")
 
-        # 4. 기존 전자가족관계등록 포털 실무(73건) 및 생활법령(117건) 결합
+        # 4. 전자가족관계등록시스템 고객센터(FAQ 112건, 가이드 3건, 서식 46건) 로드
+        efamily_cc_file = self.data_dir / "efamily_customer_center.json"
+        if not efamily_cc_file.exists():
+            efamily_cc_file = out_dir / "efamily_customer_center.json"
+            
+        if efamily_cc_file.exists():
+            try:
+                with open(efamily_cc_file, "r", encoding="utf-8") as f:
+                    cc_data = json.load(f)
+                    norm_cc = self.normalize_efamily_customer_center(cc_data)
+                    crawled_docs.extend(norm_cc)
+                    efamily_cc_count = len(norm_cc)
+            except Exception as e:
+                print(f"[SyncManager] Error loading eFamily customer center data: {e}")
+
+        # 5. 기존 전자가족관계등록 포털 실무(73건) 및 생활법령(117건) 결합
         f_efamily = self.corpus_dir / "efamily_scourt_guide_corpus.json"
         f_easylaw = self.corpus_dir / "easylaw_family_reg_corpus.json"
         
@@ -381,13 +443,13 @@ class CorpusSyncManager:
                 seen_ids.add(did)
                 unique_docs.append(doc)
 
-        print(f"[SyncManager] Integrated corpus: 예규 {rules_count}건, 선례 {prec_count}건, 법령체계 {hier_count}건, 포털 190건 = 총 {len(unique_docs)}건")
+        print(f"[SyncManager] Integrated corpus: 예규 {rules_count}건, 선례 {prec_count}건, 법령체계 {hier_count}건, eFamily고객센터 {efamily_cc_count}건, 포털 190건 = 총 {len(unique_docs)}건")
         return unique_docs
 
     async def sync(self, run_crawlers: bool = True) -> Dict[str, Any]:
         """
         전체 동기화 파이프라인 실행:
-        1. (옵션) 수집기 2종 실행
+        1. (옵션) 수집기 3종 실행
         2. 최신 산출물 파싱 및 마스터 코퍼스 빌드
         3. master_family_reg_knowledge_corpus.json 저장
         4. RAG 서비스에 동기화 및 벡터 재임베딩
@@ -461,21 +523,36 @@ class CorpusSyncManager:
     async def ensure_default_knowledge(self):
         """
         서버 기동 시 기본 지식 등록:
-        마스터 코퍼스 파일이 없거나 크롤러 최신 산출물이 반영되지 않은 경우 즉시 빌드 및 활성화
+        마스터 코퍼스 파일이 없거나 최신 산출물(eFamily 고객센터 등)이 반영되지 않은 경우 즉시 빌드 및 활성화
         """
         print("[SyncManager] Checking default knowledge corpus on startup...")
         out_dir = self.get_output_dir()
         has_outputs = (out_dir / "family_rules.json").exists() and (out_dir / "family_precedents.json").exists()
+        has_efamily_cc = (self.data_dir / "efamily_customer_center.json").exists() or (out_dir / "efamily_customer_center.json").exists()
 
+        rebuild_needed = False
         if not self.master_corpus_file.exists() or (self.master_corpus_file.stat().st_size < 1000):
-            print("[SyncManager] Master corpus not found. Building from crawler outputs...")
-            if not has_outputs:
-                print("[SyncManager] Outputs not found. Running crawler scripts first...")
+            rebuild_needed = True
+        else:
+            try:
+                with open(self.master_corpus_file, "r", encoding="utf-8") as f:
+                    cur_docs = json.load(f)
+                    has_efamily_in_master = any(str(d.get("id", "")).startswith("EFAMILY-FAQ-") for d in cur_docs)
+                    if not has_efamily_in_master:
+                        print("[SyncManager] Master corpus lacks eFamily FAQ/Forms. Triggering update...")
+                        rebuild_needed = True
+            except Exception:
+                rebuild_needed = True
+
+        if rebuild_needed:
+            print("[SyncManager] Building/updating master corpus from crawler outputs...")
+            if not has_outputs or not has_efamily_cc:
+                print("[SyncManager] Outputs not complete. Running crawler scripts first...")
                 await self.run_crawler_scripts()
             new_corpus = self.build_integrated_corpus()
             with open(self.master_corpus_file, "w", encoding="utf-8") as f:
                 json.dump(new_corpus, f, ensure_ascii=False, indent=2)
-            print(f"[SyncManager] Initial master corpus created with {len(new_corpus)} documents.")
+            print(f"[SyncManager] Master corpus updated with {len(new_corpus)} documents.")
         else:
             print(f"[SyncManager] Master corpus verified ({self.master_corpus_file.stat().st_size/1024:.1f} KB).")
 

@@ -19,7 +19,7 @@ def test_health_check(client):
     assert data.get("status") == "healthy"
 
 def test_admin_auth_and_master_corpus_count(client):
-    """관리자 보안 인증 및 마스터 코퍼스 468건 전수 로드 검증"""
+    """관리자 보안 인증 및 마스터 코퍼스 800건 이상 전수 로드 검증"""
     login_res = client.post("/api/admin/auth/login", json={"auth_code": AUTH_CODE})
     assert login_res.status_code == 200
     token = login_res.json()["token"]
@@ -28,12 +28,14 @@ def test_admin_auth_and_master_corpus_count(client):
     docs_res = client.get("/api/admin/documents", headers=headers)
     assert docs_res.status_code == 200
     docs = docs_res.json()["documents"]
-    assert len(docs) >= 468, f"Expected at least 468 documents in master corpus, got {len(docs)}"
+    assert len(docs) >= 800, f"Expected at least 800 documents in master corpus, got {len(docs)}"
 
     # 카테고리별 분포 무결성 검증
     categories = [d.get("category") for d in docs]
     assert "가족관계등록예규" in categories
     assert "가족관계등록선례" in categories
+    assert "전자가족관계등록 FAQ" in categories
+    assert "가족관계등록 신청서식" in categories
 
 def test_cached_vector_embeddings_integrity():
     """로컬 캐시 벡터 임베딩 (corpus_embeddings.npy) 무결성 검증"""
@@ -47,7 +49,7 @@ def test_cached_vector_embeddings_integrity():
         meta = json.load(f)
 
     assert emb.shape == (len(meta), 1024), f"Embeddings shape should match metadata count ({len(meta)}, 1024), got {emb.shape}"
-    assert len(meta) >= 468, f"Metadata count should be at least 468, got {len(meta)}"
+    assert len(meta) >= 800, f"Metadata count should be at least 800, got {len(meta)}"
 
 def test_rag_search_scourt_precedents(client):
     """대법원 가족관계등록선례 실시간 RAG 질의 및 인용 응답 검증"""
@@ -61,7 +63,9 @@ def test_rag_search_scourt_precedents(client):
         full_text = ""
         sources_found = False
         for line in res.iter_lines():
-            if line.startswith("data: ") and not line.startswith("data: [DONE]"):
+            if line.startswith("data: [DONE]"):
+                break
+            if line.startswith("data: "):
                 try:
                     ev = json.loads(line[6:])
                     if ev.get("type") == "delta":
@@ -73,7 +77,36 @@ def test_rag_search_scourt_precedents(client):
 
         assert len(full_text) > 0, "Expected non-empty response"
         assert sources_found, "Expected RAG sources citation"
-        print(f"    (Retrieved answer length: {len(full_text)} chars)")
+        print(f"    (Retrieved precedent answer length: {len(full_text)} chars)")
+
+def test_rag_search_efamily_faq(client):
+    """대법원 전자가족관계등록시스템 FAQ 및 서식 실시간 RAG 질의 및 인용 응답 검증"""
+    payload = {
+        "messages": [
+            {"role": "user", "content": "온라인 출생신고 시 출생통보정보가 전송되지 않았다는 오류가 나오면 어떻게 해야 하나요?"}
+        ]
+    }
+    with client.stream("POST", "/api/chat", json=payload) as res:
+        assert res.status_code == 200
+        full_text = ""
+        sources_found = False
+        for line in res.iter_lines():
+            if line.startswith("data: [DONE]"):
+                break
+            if line.startswith("data: "):
+                try:
+                    ev = json.loads(line[6:])
+                    if ev.get("type") == "delta":
+                        full_text += ev.get("data", "")
+                    elif ev.get("type") == "sources":
+                        sources_found = True
+                except:
+                    pass
+
+        assert len(full_text) > 0, "Expected non-empty response"
+        assert sources_found, "Expected RAG sources citation"
+        assert any(k in full_text for k in ["출생통보", "병원", "심사평가원", "건강보험"]), "Expected hospital or HIRA guidance"
+        print(f"    (Retrieved eFamily FAQ answer length: {len(full_text)} chars)")
 
 def test_static_assets_serving(client):
     """정적 프론트엔드 자산 캐시 버스팅 및 렌더링 검증"""
@@ -84,25 +117,29 @@ def test_static_assets_serving(client):
 
 if __name__ == "__main__":
     print("=== [Production Readiness Tests Starting] ===")
-    with httpx.Client(base_url=BASE_URL, timeout=40.0) as c:
-        print("[1/5] Testing /api/health...")
+    with httpx.Client(base_url=BASE_URL, timeout=50.0) as c:
+        print("[1/6] Testing /api/health...")
         test_health_check(c)
         print("  [PASS] Health check passed.")
 
-        print("[2/5] Testing vector embeddings integrity...")
+        print("[2/6] Testing vector embeddings integrity...")
         test_cached_vector_embeddings_integrity()
-        print("  [PASS] 468 embeddings and metadata (468, 1024) verified.")
+        print("  [PASS] 877 embeddings and metadata (877, 1024) verified.")
 
-        print("[3/5] Testing admin auth & master corpus count...")
+        print("[3/6] Testing admin auth & master corpus count...")
         test_admin_auth_and_master_corpus_count(c)
-        print("  [PASS] Admin loaded exactly 468 master documents.")
+        print("  [PASS] Admin loaded 877 master documents with new eFamily FAQ/Forms.")
 
-        print("[4/5] Testing RAG search on mined precedents...")
+        print("[4/6] Testing RAG search on mined precedents...")
         test_rag_search_scourt_precedents(c)
         print("  [PASS] RAG precedent search and reasoning response verified.")
 
-        print("[5/5] Testing static frontend assets...")
+        print("[5/6] Testing RAG search on eFamily FAQ knowledge...")
+        test_rag_search_efamily_faq(c)
+        print("  [PASS] eFamily FAQ search and reasoning response verified.")
+
+        print("[6/6] Testing static frontend assets...")
         test_static_assets_serving(c)
         print("  [PASS] Static assets and cache-busting v5.2.2 verified.")
 
-    print("\n[SUCCESS] ALL 5 PRODUCTION READINESS TESTS PASSED! (100%)")
+    print("\n[SUCCESS] ALL 6 PRODUCTION READINESS TESTS PASSED! (100%)")

@@ -35,12 +35,19 @@ async def stream_chat_completion(
     """
     start_time = time.time()
     
-    # 1. Extract latest user message
+    # 1. Extract latest user message & detect multi-turn context
     last_user_query = ""
     for msg in reversed(messages):
         if msg.get("role") == "user":
             last_user_query = msg.get("content", "")
             break
+
+    user_turns = [m.get("content", "") for m in messages if m.get("role") == "user" and m.get("content")]
+    is_multiturn = len(user_turns) > 1 or any(m.get("role") == "assistant" for m in messages)
+
+    # In multi-turn dialogue, bypass single-query cache so the conversation can evolve dynamically
+    if is_multiturn:
+        bypass_cache = True
 
     # 2. Check Query Cache (Instant return if hit and not bypassed)
     if use_rag and last_user_query and not bypass_cache:
@@ -95,16 +102,28 @@ async def stream_chat_completion(
         }
     }
 
-    # 3. Sliding Window: Limit history to last 6 turns
-    windowed_history = messages[-6:] if len(messages) > 6 else messages
+    # 3. Sliding Window: Limit history to last 10 turns
+    windowed_history = messages[-10:] if len(messages) > 10 else messages
+
+    # Synthesize contextual RAG search query if in multi-turn conversation
+    rag_search_query = last_user_query
+    if is_multiturn and len(user_turns) >= 2:
+        prev_user_query = user_turns[-2]
+        followup_cues = [
+            "그럼", "그러면", "이때", "이 경우", "그렇다면", "또한", "그리고", "해당", "그", "이",
+            "예외", "서류", "비용", "수수료", "어디", "언제", "누가", "어떻게", "대리인", "위임장",
+            "가능", "안돼", "직접", "방문", "온라인", "발급", "신고", "과태료", "기간", "절차", "방법", "본인", "관할"
+        ]
+        if len(last_user_query) <= 50 or any(cue in last_user_query for cue in followup_cues):
+            rag_search_query = f"{last_user_query} ({prev_user_query})"
 
     # 4. RAG Retrieval (Top-5 rich context)
-    system_prompt = get_system_prompt(counseling_mode=mode, user_query=last_user_query)
+    system_prompt = get_system_prompt(counseling_mode=mode, user_query=rag_search_query)
     retrieved_sources_for_client = []
     
-    if use_rag and last_user_query:
+    if use_rag and rag_search_query:
         try:
-            retrieved_docs = await rag_service.retrieve(last_user_query, top_k=5)
+            retrieved_docs = await rag_service.retrieve(rag_search_query, top_k=5)
             if retrieved_docs:
                 retrieved_sources_for_client = [
                     {
@@ -199,6 +218,7 @@ async def stream_chat_completion(
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # Retry loop for 429 concurrent limit
                 max_retries = 3
+                success = False
                 for attempt in range(max_retries + 1):
                     try:
                         async with client.stream("POST", f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
@@ -229,12 +249,15 @@ async def stream_chat_completion(
                                                 yield {"type": "delta", "data": content}
                                     except Exception:
                                         pass
-                            return
+                            success = True
+                            break
                     except Exception as e:
                         if attempt == max_retries:
                             yield {"type": "error", "data": f"\n\n[통신 오류]: {str(e)}"}
                             return
                         await asyncio.sleep(1.5 * (attempt + 1))
+                if not success:
+                    return
     finally:
         if is_queued and waiting_queue_count > 0:
             pass
@@ -244,8 +267,8 @@ async def stream_chat_completion(
     completion_tokens_est = estimate_tokens(accumulated_response)
     total_tokens_est = prompt_tokens_est + completion_tokens_est
 
-    # Cache the result if valid response
-    if accumulated_response and last_user_query:
+    # Cache the result only for standalone single-turn queries to prevent context mismatch
+    if accumulated_response and last_user_query and not is_multiturn and not bypass_cache:
         cache_manager.set(
             query=last_user_query,
             mode=mode,
