@@ -33,16 +33,42 @@ async def ingest_efamily_knowledge():
     existing_ids = {str(d.get("id")) for d in rag_service.corpus}
     print(f"[Ingest] Current RAG corpus size: {len(rag_service.corpus)}")
 
-    # 3. Find missing documents to add
-    new_docs = [d for d in norm_docs if str(d.get("id")) not in existing_ids]
-    print(f"[Ingest] New eFamily documents to embed: {len(new_docs)}")
+    # 3. Check for updated documents (e.g. newly extracted attachment text)
+    form_docs = [d for d in norm_docs if d.get("category") == "가족관계등록 신청서식"]
+    updated_forms = []
+    
+    corpus_map = {str(d.get("id")): idx for idx, d in enumerate(rag_service.corpus)}
+    
+    for f_doc in form_docs:
+        fid = str(f_doc.get("id"))
+        if fid in corpus_map:
+            idx = corpus_map[fid]
+            if len(f_doc.get("content", "")) > len(rag_service.corpus[idx].get("content", "")):
+                rag_service.corpus[idx] = f_doc
+                updated_forms.append((idx, f_doc))
 
+    if updated_forms:
+        print(f"[Ingest] Re-embedding {len(updated_forms)} forms with newly extracted attachment text...")
+        import httpx
+        import numpy as np
+        from rag.rag_service import CACHE_EMBEDDINGS_PATH, CACHE_METADATA_PATH
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for idx, doc in updated_forms:
+                text_to_embed = rag_service._build_embedding_text(doc)
+                emb = await rag_service._embed_single_text_with_retry(client, text_to_embed)
+                rag_service.embeddings[idx] = np.array(emb, dtype=np.float32)
+                
+        np.save(CACHE_EMBEDDINGS_PATH, rag_service.embeddings)
+        with open(CACHE_METADATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(rag_service.corpus, f, ensure_ascii=False, indent=2)
+        print(f"[Ingest] Re-embedding completed and saved for {len(updated_forms)} forms.")
+
+    # 4. Find completely new documents to add
+    new_docs = [d for d in norm_docs if str(d.get("id")) not in existing_ids]
     if new_docs:
-        print("[Ingest] Generating bge-m3 embeddings and indexing...")
+        print(f"[Ingest] Generating bge-m3 embeddings for {len(new_docs)} new docs...")
         added_count = await rag_service.add_documents(new_docs)
         print(f"[Ingest] Successfully added {added_count} documents to RAG index.")
-    else:
-        print("[Ingest] All eFamily documents are already indexed in RAG.")
 
     # 4. Update master_family_reg_knowledge_corpus.json
     print("[Ingest] Updating master knowledge corpus file...")

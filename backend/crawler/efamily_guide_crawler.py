@@ -16,15 +16,18 @@ import time
 import httpx
 from pathlib import Path
 from bs4 import BeautifulSoup
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 BASE_URL = "https://efamily.scourt.go.kr"
 AJAX_URL = f"{BASE_URL}/cs/CsBltnWrtListAjax.do"
 GUIDE_URL = f"{BASE_URL}/cs/CsBltnWrtGuide.do"
+DOWN_URL = f"{BASE_URL}/cs/CsDownAtchfile.do"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_FILE = OUTPUT_DIR / "efamily_customer_center.json"
+FORM_CACHE_DIR = OUTPUT_DIR / "form_templates"
+FORM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # scourt_crawler output mirror paths
 MIRROR_DIRS = [
@@ -174,9 +177,103 @@ def fetch_all_guides(client: httpx.Client) -> List[Dict[str, Any]]:
             
     return guide_items
 
+def download_form_attachment(client: httpx.Client, bltn_id: str, atch_id: str, atch_nm: str) -> Optional[Path]:
+    """신청서 첨부파일 다운로드 및 로컬 캐싱"""
+    safe_name = re.sub(r'[\\/:*?"<>|]', '_', atch_nm)
+    cached_path = FORM_CACHE_DIR / safe_name
+    
+    if cached_path.exists() and cached_path.stat().st_size > 100:
+        return cached_path
+
+    # Try extracting from form_templates.zip if available
+    zip_path = FORM_CACHE_DIR.parent / "form_templates.zip"
+    if zip_path.exists():
+        try:
+            import zipfile
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+                for target_nm in (safe_name, atch_nm):
+                    if target_nm in names:
+                        FORM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                        zf.extract(target_nm, FORM_CACHE_DIR)
+                        extracted = FORM_CACHE_DIR / target_nm
+                        if extracted.exists():
+                            return extracted
+        except Exception as e:
+            pass
+        
+    try:
+
+        res = client.post(
+            DOWN_URL,
+            data={
+                "bltnbordId": "0000005",
+                "bltnId": bltn_id,
+                "atchfileId": atch_id,
+                "atchfileNm": atch_nm
+            },
+            timeout=25.0
+        )
+        if res.status_code == 200 and len(res.content) > 100:
+            with open(cached_path, "wb") as f:
+                f.write(res.content)
+            return cached_path
+        else:
+            print(f"  [Form Down] Failed ({res.status_code}) for {atch_nm}")
+    except Exception as e:
+        print(f"  [Form Down] Error downloading {atch_nm}: {e}")
+    return None
+
+def extract_form_document_text(file_path: Path) -> Dict[str, Any]:
+    """PDF 또는 HWP 서식 파일 본문 및 작성방법 추출"""
+    ext = file_path.suffix.lower()
+    res = {
+        "page_count": 0,
+        "full_text": "",
+        "front_fields": "",
+        "instructions": ""
+    }
+    
+    if ext == ".pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(str(file_path))
+            pages = reader.pages
+            res["page_count"] = len(pages)
+            page_texts = []
+            for p in pages:
+                t = p.extract_text() or ""
+                t_clean = clean_html_text(t)
+                page_texts.append(t_clean)
+                
+            res["full_text"] = "\n\n".join(page_texts)
+            if len(page_texts) >= 1:
+                res["front_fields"] = page_texts[0]
+            if len(page_texts) >= 2:
+                res["instructions"] = "\n\n".join(page_texts[1:])
+        except Exception as e:
+            print(f"  [Form Extract] PDF extraction error for {file_path.name}: {e}")
+            
+    elif ext == ".hwp":
+        try:
+            import olefile
+            if olefile.isOleFile(str(file_path)):
+                ole = olefile.OleFileIO(str(file_path))
+                if ole.exists("PrvText"):
+                    raw = ole.openstream("PrvText").read()
+                    text = raw.decode("utf-16le", errors="ignore")
+                    text_clean = clean_html_text(text)
+                    res["full_text"] = text_clean
+                    res["front_fields"] = text_clean
+                    res["page_count"] = 1
+        except Exception as e:
+            print(f"  [Form Extract] HWP extraction error for {file_path.name}: {e}")
+            
+    return res
+
 def fetch_all_forms(client: httpx.Client) -> List[Dict[str, Any]]:
-    """신청서 양식 다운로드 46건 전수 수집"""
-    print("[eFamily Crawler] Fetching Application Forms (bltnbordId=0000005)...")
+    """신청서 양식 다운로드 46건 전수 수집 및 첨부문서 기재요령 크롤링"""
+    print("[eFamily Crawler] Fetching Application Forms and Attachments (bltnbordId=0000005)...")
     page = 1
     total_records = 0
     form_items = []
@@ -221,17 +318,55 @@ def fetch_all_forms(client: httpx.Client) -> List[Dict[str, Any]]:
                         
                 files_str = "\n".join([f"- 첨부 서식: {fn}" for fn in file_names]) if file_names else "- 별도 첨부파일 없음 (안내문)"
                 
+                # Best attachment selection: prefer .pdf, then .hwp
+                best_atch = None
+                for atch in atch_list:
+                    fn = atch.get("atchfileNm", "").lower()
+                    if fn.endswith(".pdf"):
+                        best_atch = atch
+                        break
+                if not best_atch:
+                    for atch in atch_list:
+                        fn = atch.get("atchfileNm", "").lower()
+                        if fn.endswith(".hwp"):
+                            best_atch = atch
+                            break
+
+                extracted = {"full_text": "", "front_fields": "", "instructions": ""}
+                extracted_file_name = ""
+                if best_atch and best_atch.get("atchfileId") and best_atch.get("atchfileNm"):
+                    extracted_file_name = best_atch["atchfileNm"]
+                    down_path = download_form_attachment(
+                        client, bltn_id, best_atch["atchfileId"], best_atch["atchfileNm"]
+                    )
+                    if down_path:
+                        extracted = extract_form_document_text(down_path)
+
                 content_parts = [
                     f"【신청서식】 {title}",
                     f"【등록일자】 {rgt_date_str}",
                     "【제공 첨부파일 목록】",
                     files_str,
-                    "\n【서식 작성 및 이용 안내】",
+                    "\n【서식 개요 및 이용 안내】",
                     clean_cts if clean_cts else "해당 서식은 대한민국 법원 가족관계등록예규 및 규칙에 따른 표준 법정 서식입니다. 다운로드하여 신고서 작성 및 관서 제출용으로 활용하십시오.",
+                ]
+                
+                if extracted.get("front_fields"):
+                    content_parts.append("\n【서식 전면 주요 기재 항목】")
+                    content_parts.append(extracted["front_fields"][:1500])
+                    
+                if extracted.get("instructions"):
+                    content_parts.append("\n【서식 뒷면 상세 작성 방법 및 심사 안내】")
+                    content_parts.append(extracted["instructions"][:2500])
+                elif extracted.get("full_text") and not extracted.get("front_fields"):
+                    content_parts.append("\n【서식 본문 전문 및 작성 안내】")
+                    content_parts.append(extracted["full_text"][:2500])
+                    
+                content_parts.extend([
                     "\n【공식 다운로드 안내】",
                     f"대법원 전자가족관계등록시스템 고객센터 > 신청서 양식 다운로드 게시판에서 공식 파일을 직접 내려받으실 수 있습니다.",
                     f"공식 다운로드 게시판: {BASE_URL}/cs/CsBltnWrtList.do?bltnbordId=0000005"
-                ]
+                ])
                 
                 form_doc = {
                     "id": f"EFAMILY-FORM-{bltn_id}",
@@ -240,6 +375,9 @@ def fetch_all_forms(client: httpx.Client) -> List[Dict[str, Any]]:
                     "source": "대법원 전자가족관계등록시스템 신청서 양식 다운로드",
                     "content": "\n".join(content_parts),
                     "file_names": file_names,
+                    "extracted_source_file": extracted_file_name,
+                    "extracted_text_length": len(extracted.get("full_text", "")),
+                    "has_attachment_text": bool(extracted.get("full_text")),
                     "registered_date": rgt_date_str,
                     "url": f"{BASE_URL}/cs/CsBltnWrtList.do?bltnbordId=0000005"
                 }
@@ -248,12 +386,12 @@ def fetch_all_forms(client: httpx.Client) -> List[Dict[str, Any]]:
             page += 1
             if len(form_items) >= total_records or page > 15:
                 break
-            time.sleep(0.3)
+            time.sleep(0.2)
         except Exception as e:
             print(f"  [Forms] Error on page {page}: {e}")
             break
             
-    print(f"  [Forms] Successfully collected {len(form_items)} Form items.")
+    print(f"  [Forms] Successfully collected {len(form_items)} Form items (with attachment texts).")
     return form_items
 
 def run_efamily_crawler() -> Dict[str, Any]:
