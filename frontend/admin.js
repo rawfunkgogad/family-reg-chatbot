@@ -385,39 +385,67 @@ function setupDashboardEvents() {
   }
 
   // Manual doc form
+  // Manual / RLHF doc form
   if (manualDocForm) {
     manualDocForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const catEl = document.getElementById('docCategory') || document.getElementById('manualCategory');
       const srcEl = document.getElementById('docSource') || document.getElementById('manualSource');
+      const promptEl = document.getElementById('rlhfPrompt');
+      const chosenEl = document.getElementById('rlhfChosen');
+      const rejectedEl = document.getElementById('rlhfRejected');
+      const legalBasisEl = document.getElementById('rlhfLegalBasis');
+
       const titleEl = document.getElementById('docTitle') || document.getElementById('manualTitle');
       const contentEl = document.getElementById('docContent') || document.getElementById('manualContent');
       const saveBtn = document.getElementById('btnSaveDoc') || document.getElementById('saveManualBtn');
 
-      const category = catEl ? catEl.value : '일반실무';
-      const source = srcEl ? srcEl.value.trim() : '관리자 직접등록';
+      const category = catEl ? catEl.value : 'RLHF모범정답';
+      const source = srcEl ? srcEl.value.trim() : '심사관 인간 피드백(RLHF)';
+      
+      const prompt = promptEl ? promptEl.value.trim() : '';
+      const chosen = chosenEl ? chosenEl.value.trim() : '';
+      const rejected = rejectedEl ? rejectedEl.value.trim() : '';
+      const legal_basis = legalBasisEl ? legalBasisEl.value.trim() : '';
+
       const title = titleEl ? titleEl.value.trim() : '';
       const content = contentEl ? contentEl.value.trim() : '';
 
-      if (!title || !content) {
-        alert('제목과 내용을 모두 입력해주세요.');
+      let payload = {};
+      if (prompt && chosen) {
+        payload = {
+          category,
+          source,
+          prompt,
+          chosen,
+          rejected,
+          legal_basis,
+          confidence_boost: 1.5
+        };
+      } else if (title && content) {
+        payload = { category, source, title, content };
+      } else {
+        alert('실무 질의(Prompt)와 심사관 공인 모범 정답(Chosen)을 입력해주세요.');
         return;
       }
 
       if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> bge-m3 임베딩 중...';
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> bge-m3 임베딩 및 RLHF 가중치 적용 중...';
       }
 
       try {
         const res = await authFetch('/api/admin/document', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category, source, title, content })
+          body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          alert('신규 법률/선례 지식이 등록되고 bge-m3 임베딩이 완료되었습니다.');
+          const successMsg = data.is_rlhf 
+            ? '⭐ 심사관 공인 모범 정답(Gold Standard)이 등록되었으며, bge-m3 1.5배 우선순위 가중치가 적용되었습니다.'
+            : '신규 지식 문서가 등록되고 bge-m3 임베딩이 완료되었습니다.';
+          alert(successMsg);
           manualDocForm.reset();
           loadAdminFiles();
           loadAdminDocuments();
@@ -429,11 +457,50 @@ function setupDashboardEvents() {
       } finally {
         if (saveBtn) {
           saveBtn.disabled = false;
-          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 지식 베이스에 즉시 등록';
+          saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> RLHF 정답 등록 및 bge-m3 임베딩';
         }
       }
     });
   }
+
+  // Export RLHF DPO Dataset (.jsonl)
+  const btnExportRLHF = document.getElementById('btnExportRLHF');
+  if (btnExportRLHF) {
+    btnExportRLHF.addEventListener('click', async () => {
+      try {
+        btnExportRLHF.disabled = true;
+        btnExportRLHF.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 데이터셋 생성 중...';
+        const res = await authFetch('/api/admin/corpus/rlhf/export');
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const dataset = data.dataset || [];
+          if (dataset.length === 0) {
+            alert('현재 등록된 RLHF 모범 정답 지식이 없습니다. 먼저 질문과 정답을 등록해주세요.');
+            return;
+          }
+          const jsonlLines = dataset.map(item => JSON.stringify(item, null, 0)).join('\n');
+          const blob = new Blob([jsonlLines], { type: 'application/x-jsonlines;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `scourt_family_law_rlhf_dpo_${Date.now()}.jsonl`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showAdminToast(`총 ${dataset.length}건의 RLHF DPO 데이터셋을 성공적으로 내보냈습니다.`, 'success');
+        } else {
+          alert(`내보내기 실패: ${data.detail || '오류 발생'}`);
+        }
+      } catch (err) {
+        alert(`오류: ${err.message}`);
+      } finally {
+        btnExportRLHF.disabled = false;
+        btnExportRLHF.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> RLHF DPO 데이터셋 내보내기 (.jsonl)';
+      }
+    });
+  }
+
 
   // Global Keyboard Navigation for 2-Column Split View
   document.addEventListener('keydown', (e) => {

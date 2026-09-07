@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import base64
@@ -169,6 +170,10 @@ class RAGService:
 
         print(f"[RAG] Total corpus now: {len(self.corpus)} documents.")
         return len(new_docs)
+
+    async def add_document(self, doc: Dict[str, Any]) -> int:
+        """단일 문서 등록 및 임베딩 갱신 편의 메서드"""
+        return await self.add_documents([doc])
 
     async def delete_document(self, doc_id: str) -> bool:
         """특정 문서 ID 삭제 및 임베딩 인덱스 갱신"""
@@ -615,6 +620,13 @@ class RAGService:
             norm_query = 1e-10
 
         sims = np.dot(self.embeddings, query_vec) / (norm_corpus.flatten() * norm_query)
+
+        # RLHF Gold Standard priority boost (1.35x)
+        for i, doc in enumerate(self.corpus):
+            meta = doc.get("metadata") or {}
+            if meta.get("is_rlhf") or doc.get("category") == "RLHF모범정답":
+                sims[i] = float(sims[i]) * 1.35
+
         actual_k = min(top_k, len(self.corpus))
         top_indices = np.argsort(sims)[::-1][:actual_k]
 
@@ -622,11 +634,14 @@ class RAGService:
         for idx in top_indices:
             doc_copy = dict(self.corpus[idx])
             doc_copy["dense_similarity"] = float(sims[idx])
+            meta = doc_copy.get("metadata") or {}
+            if meta.get("is_rlhf") or doc_copy.get("category") == "RLHF모범정답":
+                doc_copy["is_rlhf"] = True
             results.append(doc_copy)
         return results
 
     async def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 4) -> List[Dict[str, Any]]:
-        """2단계: bge-reranker-v2-m3 정밀 리랭킹"""
+        """2단계: bge-reranker-v2-m3 정밀 리랭킹 및 RLHF 가중치 적용"""
         if not candidates:
             return []
 
@@ -654,8 +669,14 @@ class RAGService:
                     reranked_docs = []
                     for item in scored_results:
                         idx = item["index"]
-                        score = item["relevance_score"]
+                        score = float(item["relevance_score"])
                         matched_doc = dict(candidates[idx])
+                        meta = matched_doc.get("metadata") or {}
+                        # Boost RLHF Gold Standard items to the very top (+2.5 score)
+                        if meta.get("is_rlhf") or matched_doc.get("category") == "RLHF모범정답":
+                            score += 2.5
+                            matched_doc["is_rlhf"] = True
+
                         matched_doc["rerank_score"] = float(score)
                         reranked_docs.append(matched_doc)
                     
@@ -666,6 +687,11 @@ class RAGService:
             except Exception as e:
                 print(f"[RAG] Rerank exception: {e}")
 
+        # Fallback if rerank fails: sort by dense similarity
+        candidates.sort(key=lambda x: x.get("dense_similarity", 0.0), reverse=True)
+        return candidates[:top_k]
+
+
     def _find_sibling_chunk(self, group_id: str, chunk_index: int) -> Optional[Dict[str, Any]]:
         """동일 문서 그룹 내의 인접(이전/다음) 청크 탐색"""
         if not group_id or chunk_index < 1:
@@ -675,13 +701,60 @@ class RAGService:
                 return doc
         return None
 
+    def decompose_query(self, query: str) -> List[str]:
+        """복합 다중 쟁점 질의를 2~3개의 세부 하위 질의로 지능형 분해 (Sub-Query Decomposition)"""
+        clean = (query or "").strip()
+        compound_delimiters = [
+            r'\s*(?:그리고|또한|동시에|및)\s*',
+            r'\s*(?:와|과)\s+(?=[가-힣]{2,})',
+            r'(?<=[가-힣])(?:하고|하며|한데|한\s*후|한\s*다음|할\s*때)\s*,?\s*',
+            r'(?<=[?？!！])\s*(?=[가-힣])',
+            r'\s*,\s*(?=(?:언제|어떻게|누가|어디서|서류|비용|기간|과태료|방법|[가-힣]{2,}))'
+        ]
+        combined_pattern = '|'.join(compound_delimiters)
+        splits = re.split(combined_pattern, clean)
+        splits = [s.strip() for s in splits if len(s.strip()) >= 4]
+        if len(splits) > 1:
+            return splits[:3]
+        return [clean]
+
     async def retrieve(self, query: str, top_k: int = 4) -> List[Dict[str, Any]]:
-        """2단계 통합 검색 (임베딩 검색 -> 리랭킹) 및 이웃 맥락 자동 확장(Parent-Child Context Extension)"""
-        dense_candidates = await self.dense_search(query, top_k=8)
-        reranked_docs = await self.rerank(query, dense_candidates, top_k=top_k)
+        """
+        지능형 복합 질의 분해 및 다각 통합 검색 (Sub-Query Decomposition & Multi-Angle RAG)
+        - 복합 질의 분해 -> 다각 병렬 임베딩 검색 -> RRF 점수 융합 및 중복 제거 -> BGE Reranker
+        - 인접 맥락 결합 (Parent-Child Context Extension) 및 Corrective RAG (CRAG) 필터링
+        """
+        sub_queries = self.decompose_query(query)
+
+        all_candidates_map = {}
+        for sub_q in sub_queries:
+            candidates = await self.dense_search(sub_q, top_k=6)
+            for rank, doc in enumerate(candidates):
+                doc_id = str(doc.get("id"))
+                if doc_id not in all_candidates_map:
+                    all_candidates_map[doc_id] = doc
+                    all_candidates_map[doc_id]["rrf_score"] = 0.0
+                all_candidates_map[doc_id]["rrf_score"] += 1.0 / (60.0 + rank + 1)
+
+        merged_candidates = list(all_candidates_map.values())
+        merged_candidates.sort(key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+        candidate_pool = merged_candidates[:12] if merged_candidates else []
+
+        # Rerank with full original query
+        reranked_docs = await self.rerank(query, candidate_pool, top_k=top_k)
+
+        # Corrective RAG: Filter out irrelevant docs if score is poor
+        filtered_docs = []
+        for doc in reranked_docs:
+            score = doc.get("rerank_score", 0.0)
+            sim = doc.get("dense_similarity", 0.0)
+            if score >= 0.15 or sim >= 0.35 or len(filtered_docs) < 2:
+                filtered_docs.append(doc)
+
+        final_docs = filtered_docs if filtered_docs else reranked_docs[:top_k]
 
         # 각 검색 결과에 대해 동일 문서 내 이웃 맥락(전후 문맥) 자동 결합
-        for doc in reranked_docs:
+        for doc in final_docs:
             group_id = doc.get("group_id")
             chunk_idx = doc.get("chunk_index")
 
@@ -706,7 +779,7 @@ class RAGService:
             else:
                 doc["expanded_content"] = doc.get("content", "")
 
-        return reranked_docs
+        return final_docs
 
     async def execute_web_agent(self, query: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """/v1/agent/chat 웹 검색 에이전트 실행"""
@@ -742,4 +815,14 @@ class RAGService:
                     "sources": []
                 }
 
+    def get_rlhf_documents(self) -> List[Dict[str, Any]]:
+        """RLHF 모범 정답 지식 항목들만 필터링하여 반환 (DPO/SFT 데이터셋용)"""
+        rlhf_docs = []
+        for d in self.corpus:
+            meta = d.get("metadata") or {}
+            if meta.get("is_rlhf") or d.get("category") == "RLHF모범정답":
+                rlhf_docs.append(d)
+        return rlhf_docs
+
 rag_service = RAGService()
+

@@ -3589,14 +3589,6 @@ body {
   border-top: 1px solid #e2e8f0;
 }
 
-/* Drawer Toolbar */
-.drawer-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 12px 16px;
 /* Drawer Toolbar (Sticky Header) */
 .drawer-toolbar {
   display: flex;
@@ -4743,3 +4735,632 @@ body {
 [data-theme="light"] .legal-doc-notice {
   color: #64748b;
 }
+
+/* =============================================================================
+   RIG (Retrieval-Interleaved Generation) Statutory Grounding Accordion Card
+   ============================================================================= */
+.rig-grounding-container {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.75));
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  animation: fadeIn 0.3s ease;
+}
+
+.rig-grounding-container:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 0 15px rgba(56, 189, 248, 0.1);
+}
+
+.rig-grounding-header {
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.12), rgba(16, 185, 129, 0.08));
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.rig-grounding-header:hover {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.22), rgba(16, 185, 129, 0.16));
+}
+
+.rig-grounding-container.open .rig-grounding-header {
+  border-bottom-color: rgba(56, 189, 248, 0.2);
+}
+
+.rig-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.rig-scale-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  font-size: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.rig-scale-badge.verified {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.rig-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rig-count-pill {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 1px 7px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rig-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.rig-chevron {
+  font-size: 11px;
+  transition: transform 0.25s ease;
+}
+
+.rig-grounding-container.open .rig-chevron {
+  transform: rotate(180deg);
+}
+
+.rig-grounding-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeIn 0.25s ease;
+}
+
+.rig-grounding-container:not(.open) .rig-grounding-body {
+  display: none;
+}
+
+/* Grid of verified law cards */
+.rig-law-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.rig-law-card {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-left: 3.5px solid #38bdf8;
+  border-radius: 9px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.rig-law-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(56, 189, 248, 0.45);
+  border-left-color: #0ea5e9;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35), 0 0 12px rgba(56, 189, 248, 0.15);
+}
+
+.rig-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rig-law-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.rig-law-icon {
+  color: #38bdf8;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.rig-law-name-tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: #38bdf8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.2px;
+}
+
+.rig-tier-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: -0.1px;
+}
+
+.rig-tier-pill.tier1 {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.rig-tier-pill.tier2 {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.rig-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rig-art-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rig-art-badge {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #ffffff;
+  background: rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 2px 8px;
+  border-radius: 5px;
+  letter-spacing: -0.2px;
+}
+
+.rig-art-title {
+  font-size: 12.5px;
+  color: #e2e8f0;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+}
+
+.rig-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.18);
+}
+
+.rig-action-link {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #38bdf8;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  transition: all 0.2s ease;
+}
+
+.rig-action-link:hover {
+  background: rgba(56, 189, 248, 0.28);
+  color: #ffffff;
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(56, 189, 248, 0.25);
+}
+
+.rig-grounding-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #94a3b8;
+  padding: 8px 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 7px;
+  line-height: 1.4;
+}
+
+.rig-grounding-notice i {
+  color: #34d399;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Light Mode Overrides */
+[data-theme="light"] .rig-grounding-container {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .rig-grounding-container:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.09);
+}
+
+[data-theme="light"] .rig-grounding-header {
+  background: #f0f9ff;
+}
+
+[data-theme="light"] .rig-grounding-container.open .rig-grounding-header {
+  border-bottom-color: #e2e8f0;
+}
+
+[data-theme="light"] .rig-header-left {
+  color: #0f172a;
+}
+
+[data-theme="light"] .rig-scale-badge {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: #bae6fd;
+}
+
+[data-theme="light"] .rig-scale-badge.verified {
+  background: #dcfce7;
+  color: #16a34a;
+  border-color: #86efac;
+}
+
+[data-theme="light"] .rig-count-pill {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: #bae6fd;
+}
+
+[data-theme="light"] .rig-law-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  border-left-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .rig-law-card:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  border-left-color: #0369a1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .rig-law-icon {
+  color: #0284c7;
+}
+
+[data-theme="light"] .rig-law-name-tag {
+  color: #0284c7;
+}
+
+[data-theme="light"] .rig-art-badge {
+  color: #0369a1;
+  background: #e0f2fe;
+  border-color: #bae6fd;
+}
+
+[data-theme="light"] .rig-art-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .rig-action-link {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0284c7;
+}
+
+[data-theme="light"] .rig-action-link:hover {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+[data-theme="light"] .rig-grounding-notice {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+/* =============================================================================
+   Judicial Confidence Badge (사법 신뢰도 지수 배지)
+   ============================================================================= */
+.judicial-confidence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(6, 182, 212, 0.1));
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  cursor: help;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.judicial-confidence-badge:hover {
+  border-color: #34d399;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  transform: translateY(-1px);
+}
+
+.judicial-confidence-badge strong {
+  color: #10b981;
+  font-weight: 800;
+}
+
+[data-theme="light"] .judicial-confidence-badge {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #15803d;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .judicial-confidence-badge strong {
+  color: #16a34a;
+}
+
+/* =============================================================================
+   Actionable Forms & e-Civil Portal Bar (실무 처리 서식 및 온라인 민원 액션 바)
+   ============================================================================= */
+.action-forms-bar {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.85));
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  animation: fadeIn 0.3s ease;
+}
+
+.action-forms-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.action-forms-header i {
+  font-size: 14px;
+  color: #38bdf8;
+}
+
+.action-forms-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-form-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.btn-form-action.download {
+  background: rgba(56, 189, 248, 0.15);
+  color: #e0f2fe;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.btn-form-action.download:hover {
+  background: rgba(56, 189, 248, 0.3);
+  color: #ffffff;
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(56, 189, 248, 0.25);
+}
+
+.btn-form-action.online {
+  background: rgba(16, 185, 129, 0.15);
+  color: #d1fae5;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.btn-form-action.online:hover {
+  background: rgba(16, 185, 129, 0.3);
+  color: #ffffff;
+  border-color: #34d399;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.25);
+}
+
+[data-theme="light"] .action-forms-bar {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .action-forms-header {
+  color: #0284c7;
+}
+
+[data-theme="light"] .action-forms-header i {
+  color: #0284c7;
+}
+
+[data-theme="light"] .btn-form-action.download {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #0369a1;
+}
+
+[data-theme="light"] .btn-form-action.download:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: #7dd3fc;
+}
+
+[data-theme="light"] .btn-form-action.online {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+[data-theme="light"] .btn-form-action.online:hover {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+/* =============================================================================
+   In-App Citation Hover Preview Tooltip (조문 인스턴트 호버 툴팁)
+   ============================================================================= */
+.law-hover-tooltip {
+  position: fixed;
+  z-index: 9999;
+  width: 320px;
+  max-width: 90vw;
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.55), 0 0 16px rgba(56, 189, 248, 0.2);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.law-hover-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.law-tooltip-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding-bottom: 6px;
+}
+
+.law-tooltip-law {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 190px;
+}
+
+.law-tooltip-tier {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  white-space: nowrap;
+}
+
+.law-tooltip-art {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.law-tooltip-body {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #cbd5e1;
+  max-height: 120px;
+  overflow: hidden;
+}
+
+.law-tooltip-footer {
+  font-size: 10px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 5px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.18);
+}
+
+[data-theme="light"] .law-hover-tooltip {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .law-tooltip-law {
+  color: #0284c7;
+}
+
+[data-theme="light"] .law-tooltip-art {
+  color: #0f172a;
+}
+
+[data-theme="light"] .law-tooltip-body {
+  color: #334155;
+}
+

@@ -17,10 +17,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm_client import stream_chat_completion
+import zipfile
 from rag.rag_service import rag_service
 from rag.corpus_data import CORPUS_DOCS
 from rag.document_parser import parse_pdf, parse_json, parse_excel
 from rag.excel_hierarchy_parser import create_sample_hierarchy_excel
+from rag.rig_engine import rig_engine, form_matcher, LawCitationParser
 from optimization.cache_manager import cache_manager
 from optimization.metrics_collector import metrics_collector
 from optimization.query_logger import query_logger
@@ -101,6 +103,7 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.5
     max_tokens: Optional[int] = 2500
     use_rag: Optional[bool] = True
+    use_rig: Optional[bool] = True
     use_web_search: Optional[bool] = False
     mode: Optional[str] = "unified"  # 단일 통합 어시스턴트
     model: Optional[str] = "llama-3.3-70b"  # "llama-3.3-70b" (표준·고속) or "gpt-oss-120b" (심층 추론)
@@ -114,10 +117,17 @@ class SearchRequest(BaseModel):
     top_k: Optional[int] = 3
 
 class ManualDocRequest(BaseModel):
-    category: str
-    title: str
-    source: str
-    content: str
+    category: Optional[str] = "일반실무"
+    title: Optional[str] = ""
+    source: Optional[str] = "관리자 직접등록"
+    content: Optional[str] = ""
+    # RLHF / Gold Standard Alignment Fields
+    prompt: Optional[str] = None
+    chosen: Optional[str] = None
+    rejected: Optional[str] = None
+    legal_basis: Optional[str] = None
+    confidence_boost: Optional[float] = 1.5
+
 
 @app.post("/api/security/check-input")
 async def check_input_security(req: CheckInputRequest):
@@ -680,25 +690,105 @@ async def upload_document(
 
 @app.post("/api/admin/document")
 async def create_single_document(doc: ManualDocRequest, token: str = Depends(verify_admin_token)):
-    if not doc.title.strip() or not doc.content.strip():
-        raise HTTPException(status_code=400, detail="제목과 내용을 모두 입력해주세요.")
-
     timestamp = int(time.time())
-    new_item = {
-        "id": f"MANUAL-{timestamp}",
-        "category": doc.category.strip() or "일반실무",
-        "source": doc.source.strip() or "관리자 직접등록",
-        "title": doc.title.strip(),
-        "content": doc.content.strip(),
-        "created_at": timestamp
-    }
+
+    # 1. RLHF Gold Standard Q&A Registration
+    if doc.prompt and doc.prompt.strip() and doc.chosen and doc.chosen.strip():
+        prompt_txt = doc.prompt.strip()
+        chosen_txt = doc.chosen.strip()
+        rejected_txt = (doc.rejected or "").strip()
+        basis_txt = (doc.legal_basis or "").strip()
+
+        title = f"[심사관 공인 정답] {prompt_txt}"
+        category = doc.category.strip() if doc.category and doc.category.strip() != "일반실무" else "RLHF모범정답"
+        source = doc.source.strip() if doc.source and doc.source.strip() != "관리자 직접등록" else "심사관 인간 피드백(RLHF)"
+
+        content_parts = [
+            f"【실무 표준 질의】\n{prompt_txt}",
+            f"【심사관 공인 모범 정답 (Gold Standard)】\n{chosen_txt}"
+        ]
+        if basis_txt:
+            content_parts.append(f"【근거 법령 및 심사 사유】\n{basis_txt}")
+        if rejected_txt:
+            content_parts.append(f"【지양/반려 답변 유형 (Avoid Pattern)】\n{rejected_txt}")
+
+        full_content = "\n\n".join(content_parts)
+
+        new_item = {
+            "id": f"RLHF-{timestamp}",
+            "category": category,
+            "source": source,
+            "title": title,
+            "content": full_content,
+            "created_at": timestamp,
+            "metadata": {
+                "is_rlhf": True,
+                "prompt": prompt_txt,
+                "chosen": chosen_txt,
+                "rejected": rejected_txt,
+                "legal_basis": basis_txt,
+                "confidence_boost": doc.confidence_boost or 1.5
+            }
+        }
+    # 2. Traditional title + content
+    else:
+        if not doc.title or not doc.title.strip() or not doc.content or not doc.content.strip():
+            raise HTTPException(status_code=400, detail="제목과 내용 또는 질의(Prompt)와 모범정답(Chosen)을 입력해주세요.")
+
+        new_item = {
+            "id": f"MANUAL-{timestamp}",
+            "category": (doc.category or "").strip() or "일반실무",
+            "source": (doc.source or "").strip() or "관리자 직접등록",
+            "title": doc.title.strip(),
+            "content": doc.content.strip(),
+            "created_at": timestamp,
+            "metadata": {
+                "is_rlhf": False
+            }
+        }
 
     added_count = await rag_service.add_documents([new_item])
     return {
         "success": True,
         "document": new_item,
+        "is_rlhf": new_item.get("metadata", {}).get("is_rlhf", False),
         "total_corpus_docs": len(rag_service.get_all_documents())
     }
+
+@app.get("/api/admin/corpus/rlhf/export")
+async def export_rlhf_dataset(format: Optional[str] = "json", token: str = Depends(verify_admin_token)):
+    """RLHF / DPO 파인튜닝용 표준 JSONL 데이터셋 내보내기 API (format=json 또는 format=jsonl)"""
+    rlhf_docs = rag_service.get_rlhf_documents()
+    dataset = []
+    for d in rlhf_docs:
+        meta = d.get("metadata") or {}
+        dataset.append({
+            "id": d.get("id"),
+            "prompt": meta.get("prompt") or d.get("title", "").replace("[심사관 공인 정답] ", ""),
+            "chosen": meta.get("chosen") or d.get("content", ""),
+            "rejected": meta.get("rejected", ""),
+            "legal_basis": meta.get("legal_basis", ""),
+            "source": d.get("source", ""),
+            "created_at": d.get("created_at")
+        })
+
+    if format == "jsonl":
+        jsonl_lines = [json.dumps(item, ensure_ascii=False) for item in dataset]
+        content = "\n".join(jsonl_lines)
+        return Response(
+            content=content,
+            media_type="application/x-jsonlines",
+            headers={
+                "Content-Disposition": 'attachment; filename="family_reg_rlhf_dpo.jsonl"'
+            }
+        )
+
+    return {
+        "success": True,
+        "total_count": len(dataset),
+        "dataset": dataset
+    }
+
 
 @app.delete("/api/admin/documents")
 async def clear_all_documents(token: str = Depends(verify_admin_token)):
@@ -837,6 +927,74 @@ async def get_quick_cases():
         }
     ]
 
+FORM_TEMPLATES_ZIP = DATA_DIR / "form_templates.zip"
+
+@app.get("/api/forms/download")
+async def download_form(filename: str):
+    """36종 대법원 공식 서식(HWP/PDF) 안전 다운로드"""
+    if not FORM_TEMPLATES_ZIP.exists():
+        raise HTTPException(status_code=404, detail="서식 아카이브 파일을 찾을 수 없습니다.")
+
+    try:
+        with zipfile.ZipFile(FORM_TEMPLATES_ZIP, "r") as z:
+            target_name = None
+            for name in z.namelist():
+                if name == filename or filename in name or name.endswith(filename):
+                    target_name = name
+                    break
+
+            if not target_name:
+                raise HTTPException(status_code=404, detail=f"요청하신 서식 '{filename}'을 찾을 수 없습니다.")
+
+            file_bytes = z.read(target_name)
+            media_type = "application/pdf" if target_name.endswith(".pdf") else "application/octet-stream"
+            encoded_fn = urllib.parse.quote(target_name.split("/")[-1])
+
+            return Response(
+                content=file_bytes,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"서식 파일 다운로드 처리 중 오류: {str(e)}")
+
+@app.get("/api/forms/match")
+async def match_forms(query: str):
+    """질의 또는 상담 주제에 맞는 공식 서식 및 전자민원 딥링크 매칭"""
+    return form_matcher.match(query)
+
+@app.get("/api/laws/preview")
+async def law_preview(law: str, article: str, branch: Optional[str] = None):
+    """조문 인앱 인스턴트 호버 프리뷰 전용 API"""
+    clean_law = LawCitationParser.resolve_canonical_law(law)
+    art_res = await rig_engine.cache.get_article(clean_law, article, branch)
+    if not art_res:
+        return {
+            "statute_name": clean_law,
+            "article_no": article,
+            "article_title": "공식 법령 조문",
+            "content": f"「{clean_law}」 {article}의 상세 법문은 국가법령정보센터에서 확인하실 수 있습니다.",
+            "enforcement_date": "현행",
+            "law_url": f"https://www.law.go.kr/법령/{urllib.parse.quote(clean_law)}/{urllib.parse.quote(article)}",
+            "tier": "국가법령정보센터"
+        }
+
+    body = art_res.get("content", "")
+    summary = body[:280] + "..." if len(body) > 280 else body
+    return {
+        "statute_name": art_res.get("statute_name", clean_law),
+        "article_no": art_res.get("article_no", article),
+        "article_title": art_res.get("article_title", ""),
+        "content": summary,
+        "enforcement_date": art_res.get("enforcement_date", "현행"),
+        "law_url": art_res.get("law_url", "https://www.law.go.kr"),
+        "tier": art_res.get("retrieval_tier", "검증됨")
+    }
+
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
     if not request.messages:
@@ -947,7 +1105,9 @@ async def chat_endpoint(request: ChatRequest):
             temperature=request.temperature or 0.5,
             max_tokens=request.max_tokens or 2500,
             use_rag=request.use_rag if request.use_rag is not None else True,
+            use_rig=request.use_rig if request.use_rig is not None else True,
             mode=request.mode or "unified",
+
             model=selected_model,
             bypass_cache=request.bypass_cache or False
         ):

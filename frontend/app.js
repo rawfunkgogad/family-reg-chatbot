@@ -42,6 +42,16 @@ const piiLiveAlertText = document.getElementById("piiLiveAlertText");
 const btnStripPii = document.getElementById("btnStripPii");
 const inputWrapper = document.getElementById("inputWrapper");
 
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 // Initialize Markdown configuration
 marked.setOptions({
   breaks: true,
@@ -407,6 +417,11 @@ async function sendMessage(text, options = {}) {
   let isCachedResponse = false;
   let piiNoticeData = null;
   let securityBlockData = null;
+  let rigContainer = null;
+  let rigVerifiedLaws = [];
+  let isRigGrounded = false;
+  let coveAuditData = null;
+  let actionFormsData = [];
 
   const useRag = ragToggle ? ragToggle.checked : true;
   const useWebSearch = webSearchToggle ? webSearchToggle.checked : false;
@@ -482,6 +497,30 @@ async function sendMessage(text, options = {}) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
               }
             }
+            // 2.6 If RIG statutory verification step received
+            else if (parsed.type === "rig_step" && parsed.data) {
+              if (parsed.data.step === "law_verify") {
+                const law = parsed.data.law || "";
+                const article = parsed.data.article || "";
+                const exists = rigVerifiedLaws.some(
+                  item => item.law === law && item.article === article
+                );
+                if (!exists) {
+                  rigVerifiedLaws.push(parsed.data);
+                }
+              } else if (parsed.data.step === "law_grounded") {
+                isRigGrounded = true;
+              }
+
+              if (!rigContainer) {
+                rigContainer = document.createElement("div");
+                rigContainer.className = "rig-grounding-container open";
+                bodyDiv.insertBefore(rigContainer, contentDiv);
+              }
+
+              renderRigAccordion(rigContainer, rigVerifiedLaws, isRigGrounded);
+              messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
             // 3. If cache status event received
             else if (parsed.type === "cache_status" && parsed.data) {
               if (parsed.data.is_cached) {
@@ -506,6 +545,14 @@ async function sendMessage(text, options = {}) {
                 isCachedResponse = true;
               }
             }
+            // 7. If CoVe factual audit received
+            else if (parsed.type === "cove_audit" && parsed.data) {
+              coveAuditData = parsed.data;
+            }
+            // 8. If Actionable Forms received
+            else if (parsed.type === "action_forms" && parsed.data) {
+              actionFormsData = parsed.data;
+            }
           } catch (e) {
             // Ignore partial json parse errors
           }
@@ -515,6 +562,58 @@ async function sendMessage(text, options = {}) {
 
     // Final render with law linkify
     contentDiv.innerHTML = linkifyLawReferences(marked.parse(accumulatedContent));
+
+    // If CoVe audit data exists, render Judicial Confidence Badge at top
+    if (coveAuditData) {
+      const confBadge = document.createElement("div");
+      confBadge.className = "judicial-confidence-badge animate-fade-in";
+      const score = coveAuditData.confidence_score || 95;
+      const rating = escapeHtml(coveAuditData.rating || "최고 신뢰 등급");
+      const checksTitle = escapeHtml((coveAuditData.passed_checks || []).join(" | "));
+      confBadge.title = `사법 팩트체크 완료: ${checksTitle}`;
+      confBadge.innerHTML = `
+        <i class="fa-solid fa-shield-halved"></i>
+        <span>사법 신뢰도: <strong>${score}%</strong> (${rating})</span>
+      `;
+      contentDiv.insertBefore(confBadge, contentDiv.firstChild);
+    }
+
+    // If Actionable Forms exist, attach Action Bar at bottom
+    if (actionFormsData && actionFormsData.length > 0) {
+      const formsBar = document.createElement("div");
+      formsBar.className = "action-forms-bar animate-fade-in";
+      
+      const formsButtonsHtml = actionFormsData.map(f => {
+        const name = escapeHtml(f.name || "신청서 양식");
+        const downloadUrl = escapeHtml(f.download_url || "#");
+        const serviceUrl = escapeHtml(f.service_url || "https://efamily.scourt.go.kr");
+        const isHwp = (f.type === "hwp" || name.includes("hwp") || (f.filename && f.filename.endsWith(".hwp")));
+        const iconClass = isHwp ? "fa-solid fa-file-word" : "fa-solid fa-file-pdf";
+        
+        return `
+          <a href="${downloadUrl}" class="btn-form-action download" download title="${name} 공식 파일 다운로드">
+            <i class="${iconClass}"></i>
+            <span>${name} 다운로드</span>
+          </a>
+          <a href="${serviceUrl}" target="_blank" rel="noopener noreferrer" class="btn-form-action online" title="전자가족관계등록시스템 인터넷 신청/안내 바로가기">
+            <i class="fa-solid fa-globe"></i>
+            <span>전자가족관계등록시스템 안내</span>
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px;"></i>
+          </a>
+        `;
+      }).join('');
+
+      formsBar.innerHTML = `
+        <div class="action-forms-header">
+          <i class="fa-solid fa-file-circle-check"></i>
+          <span>원스톱 실무 처리 서식 및 온라인 민원 접수</span>
+        </div>
+        <div class="action-forms-list">
+          ${formsButtonsHtml}
+        </div>
+      `;
+      contentDiv.appendChild(formsBar);
+    }
 
     // If response was from cache, attach interactive banner
     if (isCachedResponse) {
@@ -628,7 +727,7 @@ function linkifyLawReferences(html) {
     const url = artAnchor
       ? `https://www.law.go.kr/법령/${encodeURIComponent(lawName)}/${encodeURIComponent(artAnchor)}`
       : `https://www.law.go.kr/법령/${encodeURIComponent(lawName)}`;
-    return `<a href="${url}" target="_blank" class="law-link-badge" title="국가법령정보센터 (${lawName} ${artAnchor}) 조문 바로가기"><i class="fa-solid fa-scale-balanced"></i> ${fullText} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>`;
+    return `<a href="${url}" target="_blank" class="law-link-badge" data-law="${escapeHtml(lawName)}" data-art="${escapeHtml(artAnchor)}" title="국가법령정보센터 (${lawName} ${artAnchor}) 조문 바로가기 (마우스 오버 시 조문 요약)"><i class="fa-solid fa-scale-balanced"></i> ${fullText} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 9.5px;"></i></a>`;
   }
 
   // 1. Compound Law & Consecutive Articles
@@ -677,6 +776,100 @@ function linkifyLawReferences(html) {
   );
 
   return out;
+}
+
+// Render RIG (Retrieval-Interleaved Generation) Statutory Grounding Accordion
+function renderRigAccordion(container, laws, isGrounded) {
+  if (!container) return;
+
+  const count = laws.length;
+  const isVerifying = !isGrounded;
+  const titleText = isGrounded
+    ? "국가법령정보센터 실시간 검증 완료"
+    : `국가법령정보센터 실시간 법령 대조 중... (${count}건)`;
+
+  const cardsHtml = laws.map((item) => {
+    const law = escapeHtml(item.law || "");
+    const article = escapeHtml(item.article || "");
+    const title = escapeHtml(item.title || "");
+    const tier = escapeHtml(item.tier || "");
+    const isTier1 = tier.includes("Tier 1") || tier.includes("내부");
+    const rawUrl = item.url || (item.law && item.article 
+      ? `https://www.law.go.kr/법령/${encodeURIComponent(item.law)}/${encodeURIComponent(item.article)}` 
+      : "https://www.law.go.kr");
+    const url = escapeHtml(rawUrl);
+
+    return `
+      <div class="rig-law-card animate-fade-in">
+        <div class="rig-card-top">
+          <div class="rig-law-title-wrap" title="${law}">
+            <i class="fa-solid fa-book-bookmark rig-law-icon"></i>
+            <span class="rig-law-name-tag">${law}</span>
+          </div>
+          <span class="rig-tier-pill ${isTier1 ? 'tier1' : 'tier2'}" title="${isTier1 ? '법원 내부 0ms 고속 캐시 검증' : '국가법령정보센터 Open API 실시간 조회'}">
+            ${isTier1 ? '<i class="fa-solid fa-bolt"></i> 내부 0ms' : '<i class="fa-solid fa-cloud"></i> 법제처 API'}
+          </span>
+        </div>
+        <div class="rig-card-body">
+          <div class="rig-art-row">
+            <span class="rig-art-badge">${article}</span>
+            ${title ? `<span class="rig-art-title">${title}</span>` : ''}
+          </div>
+        </div>
+        <div class="rig-card-bottom">
+          <a href="${url}" target="_blank" rel="noopener noreferrer" class="rig-action-link" title="국가법령정보센터 (${law} ${article}) 조문 원문 새 창 열람">
+            <i class="fa-solid fa-scale-balanced"></i>
+            <span>조문 원문</span>
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+          </a>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const wasOpen = container.dataset.userToggled === "true" 
+    ? container.classList.contains("open") 
+    : true;
+
+  container.innerHTML = `
+    <div class="rig-grounding-header" role="button" tabindex="0" title="클릭하여 실시간 검증된 법령 조문 목록을 펼치거나 접습니다">
+      <div class="rig-header-left">
+        <span class="rig-scale-badge ${isGrounded ? 'verified' : ''}">
+          <i class="fa-solid ${isGrounded ? 'fa-shield-check' : 'fa-scale-balanced'} ${isVerifying ? 'fa-spin' : ''}"></i>
+        </span>
+        <div class="rig-header-title">
+          <span>${titleText}</span>
+        </div>
+        ${count > 0 ? `<span class="rig-count-pill">${count}개 조문</span>` : ''}
+      </div>
+      <div class="rig-header-right">
+        <span class="rig-toggle-label">조문 확인</span>
+        <i class="fa-solid fa-chevron-down rig-chevron"></i>
+      </div>
+    </div>
+    <div class="rig-grounding-body">
+      ${count > 0 ? `<div class="rig-law-grid">${cardsHtml}</div>` : '<div style="font-size:12px; color:#94a3b8; padding:4px 0;"><i class="fa-solid fa-spinner fa-spin"></i> 관련 법령 조문을 대조하고 있습니다...</div>'}
+      <div class="rig-grounding-notice">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span>법제처 국가법령정보센터(law.go.kr) 최신 현행 법률 원문과 실시간 대조하여 검증된 신뢰성 높은 답변입니다.</span>
+      </div>
+    </div>
+  `;
+
+  if (wasOpen) {
+    container.classList.add("open");
+  } else {
+    container.classList.remove("open");
+  }
+
+  const header = container.querySelector(".rig-grounding-header");
+  if (header) {
+    header.addEventListener("click", (e) => {
+      e.stopPropagation();
+      container.dataset.userToggled = "true";
+      container.classList.toggle("open");
+    });
+  }
 }
 
 function renderSourcesAccordion(sources) {
@@ -909,8 +1102,108 @@ async function openLegalDocModal(targetQuery) {
 }
 window.openLegalDocModal = openLegalDocModal;
 
-// Modal Close & Copy Listeners
+// Floating Law Hover Tooltip Manager
+let lawHoverTooltipEl = null;
+const lawPreviewCache = {};
+
+function initLawHoverTooltip() {
+  if (lawHoverTooltipEl) return;
+  lawHoverTooltipEl = document.createElement("div");
+  lawHoverTooltipEl.id = "lawHoverTooltip";
+  lawHoverTooltipEl.className = "law-hover-tooltip";
+  document.body.appendChild(lawHoverTooltipEl);
+
+  let hideTimeout = null;
+
+  document.addEventListener("mouseover", async (e) => {
+    const badge = e.target.closest(".law-link-badge");
+    if (!badge) return;
+
+    clearTimeout(hideTimeout);
+    const law = badge.dataset.law || "";
+    const art = badge.dataset.art || "";
+    if (!law && !art) return;
+
+    const cacheKey = `${law}:${art}`;
+    const rect = badge.getBoundingClientRect();
+
+    let top = rect.bottom + 8;
+    let left = rect.left;
+    if (left + 330 > window.innerWidth) {
+      left = Math.max(10, window.innerWidth - 340);
+    }
+    if (top + 180 > window.innerHeight) {
+      top = Math.max(10, rect.top - 180);
+    }
+
+    lawHoverTooltipEl.style.top = `${top}px`;
+    lawHoverTooltipEl.style.left = `${left}px`;
+
+    if (lawPreviewCache[cacheKey]) {
+      renderTooltipContent(lawPreviewCache[cacheKey]);
+    } else {
+      lawHoverTooltipEl.innerHTML = `
+        <div class="law-tooltip-top">
+          <span class="law-tooltip-law">${escapeHtml(law)}</span>
+          <span class="law-tooltip-tier"><i class="fa-solid fa-spinner fa-spin"></i> 실시간 대조 중...</span>
+        </div>
+        <div class="law-tooltip-art">${escapeHtml(art || '조문')}</div>
+        <div class="law-tooltip-body" style="color: #94a3b8;">법령 조문 원문을 실시간 조회하고 있습니다...</div>
+      `;
+      lawHoverTooltipEl.classList.add("visible");
+
+      try {
+        const res = await fetch(`/api/laws/preview?law=${encodeURIComponent(law)}&article=${encodeURIComponent(art)}`);
+        if (res.ok) {
+          const data = await res.json();
+          lawPreviewCache[cacheKey] = data;
+          if (lawHoverTooltipEl.classList.contains("visible")) {
+            renderTooltipContent(data);
+          }
+        }
+      } catch (err) {
+        // ignore preview fetch errors
+      }
+    }
+    lawHoverTooltipEl.classList.add("visible");
+  });
+
+  document.addEventListener("mouseout", (e) => {
+    const badge = e.target.closest(".law-link-badge");
+    if (badge) {
+      hideTimeout = setTimeout(() => {
+        if (lawHoverTooltipEl) lawHoverTooltipEl.classList.remove("visible");
+      }, 150);
+    }
+  });
+
+  function renderTooltipContent(data) {
+    const sName = escapeHtml(data.statute_name || "");
+    const aNo = escapeHtml(data.article_no || "");
+    const aTitle = escapeHtml(data.article_title || data.title || "");
+    const content = escapeHtml(data.snippet || data.content || data.full_content || "");
+    const tier = escapeHtml(data.retrieval_tier || data.tier || "국가법령센터");
+    const date = escapeHtml(data.enforcement_date || "현행");
+
+    lawHoverTooltipEl.innerHTML = `
+      <div class="law-tooltip-top">
+        <span class="law-tooltip-law" title="${sName}"><i class="fa-solid fa-scale-balanced" style="margin-right:4px;"></i>${sName}</span>
+        <span class="law-tooltip-tier">${tier}</span>
+      </div>
+      <div class="law-tooltip-art">${aNo} ${aTitle ? `<span style="font-size:12px; font-weight:600; color:#cbd5e1; margin-left:4px;">(${aTitle})</span>` : ''}</div>
+      <div class="law-tooltip-body">${content}</div>
+      <div class="law-tooltip-footer">
+        <span><i class="fa-solid fa-calendar-check" style="margin-right:3px;"></i>시행: ${date}</span>
+        <span style="color:#38bdf8;">새 창 열람 <i class="fa-solid fa-arrow-up-right-from-square"></i></span>
+      </div>
+    `;
+  }
+}
+
+// Modal Close & Copy Listeners & Law Tooltip Init
 document.addEventListener("DOMContentLoaded", () => {
+  initLawHoverTooltip();
+
   const modal = document.getElementById("legalDocModal");
   const btnClose = document.getElementById("btnCloseLegalDocModal");
   const btnCloseBottom = document.getElementById("btnCloseLegalDocBottom");
