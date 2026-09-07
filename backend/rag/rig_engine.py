@@ -470,13 +470,33 @@ class LawCitationParser:
         r'(?:동\s*법|같은\s*법|동법|동\s*규칙|같은\s*규칙)\s*(?:제\s*)?(?P<art>\d+)\s*(?:조(?:\s*의\s*(?P<branch>\d+))?)?(?:\s*제?\s*(?P<para>\d+)항)?'
     )
 
-    @staticmethod
-    def resolve_canonical_law(raw_law: str) -> str:
+    INVALID_LAW_NAMES = {"방법", "용법", "문법", "화법", "비법", "입법", "불법", "편법", "탈법", "합법", "사법"}
+
+    # 가족관계등록 및 친족·상속·가사소송 사법 도메인 핵심 키워드 (119구조구급법, 도로교통법 등 외래 법령 노이즈 원천 차단)
+    FAMILY_LAW_DOMAIN_KEYWORDS = [
+        "가족관계", "등록부", "민법", "가사소송", "주민등록", "입양", "친양자",
+        "국적법", "보호출산", "호적", "대법원규칙", "법원조직", "가사",
+        "질서위반", "가정폭력", "형법"
+    ]
+
+    @classmethod
+    def resolve_canonical_law(cls, raw_law: str) -> Optional[str]:
         clean = (raw_law or "").strip()
+        if not clean or clean in cls.INVALID_LAW_NAMES:
+            return None
         if clean == "법":
             return "가족관계의 등록 등에 관한 법률"
         if clean == "규칙":
             return "가족관계의 등록 등에 관한 규칙"
+
+        # 따옴표/괄호 정제
+        clean = re.sub(r'^[「『\[\(<]+|[」』\]\)>]+$', '', clean).strip()
+
+        # 도메인 가드: 가족관계등록 및 가사 사법 도메인 법률 여부 검증
+        is_family_domain = any(kw in clean for kw in cls.FAMILY_LAW_DOMAIN_KEYWORDS)
+        if not is_family_domain:
+            return None
+
         return clean
 
     @classmethod
@@ -512,6 +532,8 @@ class LawCitationParser:
                 if sub_m:
                     raw_name = sub_m.group("bracket_law") or sub_m.group("compound_law") or sub_m.group("raw_law")
                     law = cls.resolve_canonical_law(raw_name)
+                    if not law:
+                        continue
                     art = sub_m.group("art")
                     branch = sub_m.group("branch")
                     para = sub_m.group("para")
@@ -530,6 +552,8 @@ class LawCitationParser:
             elif ev_type == "universal":
                 raw_name = match.group("bracket_law") or match.group("compound_law") or match.group("raw_law")
                 law = cls.resolve_canonical_law(raw_name)
+                if not law:
+                    continue
                 art = match.group("art")
                 branch = match.group("branch")
                 para = match.group("para")
@@ -571,6 +595,8 @@ class LawCitationParser:
             elif ev_type == "anaphora":
                 if last_law:
                     law = cls.resolve_canonical_law(last_law)
+                    if not law:
+                        continue
                     art = match.group("art")
                     branch = match.group("branch")
                     para = match.group("para")
@@ -615,7 +641,100 @@ class RIGOrchestrator:
         self.cache = DualTierLawCache(self.client)
         self.parser = LawCitationParser()
 
-    async def verify_citations(self, text: str, initial_laws: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    TOPIC_STATUTE_RULES = [
+        # [신설] 미혼부 / 혼인외 출생자의 출생신고 (가족관계등록법 제57조 친생자출생의 신고 등 - 일명 사랑이법)
+        {
+            "keywords": ["미혼부", "혼인외", "혼외", "친생자출생", "사랑이법", "모를 알 수 없", "모의 인적사항"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제57조",
+            "topic": "친생자출생의 신고 (미혼부 출생신고 및 가정법원 확인)"
+        },
+        # [신설] 온라인 / 전자가족관계등록시스템을 이용한 출생신고 (가족관계등록법 제44조의2)
+        {
+            "keywords": ["온라인", "인터넷", "전자출생", "전자가족관계등록", "시스템"],
+            "required_all": ["출생"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제44조의2",
+            "topic": "전자가족관계등록시스템을 이용한 출생신고"
+        },
+        # [신설] 출생신고의무자 (혼인외 자녀는 원칙적으로 모가 신고의무자 - 가족관계등록법 제46조)
+        {
+            "keywords": ["신고의무자", "신고자격", "누가 신고", "미혼부", "혼인외", "혼외"],
+            "required_all": ["출생"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제46조",
+            "topic": "출생신고의무자"
+        },
+        {
+            "keywords": ["증명서", "교부", "발급", "형제자매", "열람", "상세증명", "기본증명서", "가족관계증명서", "수수료"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제14조",
+            "topic": "증명서 교부"
+        },
+        {
+            "keywords": ["직권정정", "간이직권정정", "오기", "정정허가", "착오기재", "등록부정정"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제18조",
+            "topic": "등록부 직권정정"
+        },
+        {
+            "keywords": ["출생신고", "신생아", "출생증명", "출산신고"],
+            "exclude_if": ["미혼부", "혼인외", "혼외"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제44조",
+            "topic": "출생신고의 기재사항"
+        },
+        {
+            "keywords": ["혼인신고", "결혼신고", "혼인의 성립", "혼인 성립"],
+            "exclude_if": ["혼인외", "혼외", "미혼", "이혼"],
+            "statute": "민법",
+            "article": "제812조",
+            "topic": "혼인의 성립"
+        },
+        {
+            "keywords": ["이혼", "협의이혼", "숙려기간", "이혼신고", "재판상이혼"],
+            "statute": "민법",
+            "article": "제834조",
+            "topic": "협의상 이혼"
+        },
+        {
+            "keywords": ["사망", "사망신고", "사망진단서", "시체검안서"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제84조",
+            "topic": "사망신고"
+        },
+        {
+            "keywords": ["개명", "개명신고", "이름변경"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제99조",
+            "topic": "개명신고"
+        },
+        {
+            "keywords": ["입양", "친양자", "파양"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제61조",
+            "topic": "입양신고"
+        },
+        {
+            "keywords": ["친생추정", "자의 성과 본", "친생부인", "성본"],
+            "statute": "민법",
+            "article": "제781조",
+            "topic": "자의 성과 본"
+        },
+        {
+            "keywords": ["과태료", "해태", "지연신고"],
+            "statute": "가족관계의 등록 등에 관한 법률",
+            "article": "제122조",
+            "topic": "과태료"
+        }
+    ]
+
+    async def verify_citations(
+        self, 
+        text: str, 
+        initial_laws: Optional[List[Dict[str, Any]]] = None,
+        user_query: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         텍스트 내 법령 인용 구문을 추출하고 국가법령정보센터 및 인메모리 캐시와 실시간 대조 검증
         """
@@ -623,12 +742,71 @@ class RIGOrchestrator:
         if initial_laws:
             citations.extend(initial_laws)
 
+        # 1. Relevance filter against user query (질의 맥락과 불일치하는 오염 조문 배제)
+        clean_q = (user_query or "").strip()
+        filtered_citations = []
+        for cite in citations:
+            statute = cite.get("statute_name", "")
+            art = str(cite.get("article_no", ""))
+            
+            # Prevent 제44조 (출생신고 일반 기재사항) from overriding specific 미혼부/혼인외 질의
+            if statute in ["가족관계의 등록 등에 관한 법률", "법"] and art == "제44조":
+                if clean_q and any(k in clean_q for k in ["미혼부", "혼인외", "혼외"]):
+                    continue
+                if clean_q and not any(k in clean_q for k in ["출생", "신생아", "출산", "44조"]):
+                    continue
+            
+            # Prevent 민법 제812조 (혼인의 성립) from bleeding into '혼인외/이혼/미혼' 질의
+            if statute == "민법" and "812" in art:
+                if clean_q and any(k in clean_q for k in ["혼인외", "혼외", "미혼", "이혼"]):
+                    continue
+
+            # Prevent 제84조 (사망신고) from bleeding into unrelated questions
+            if statute in ["가족관계의 등록 등에 관한 법률", "법"] and "84" in art:
+                if clean_q and not any(k in clean_q for k in ["사망", "사체", "84조"]):
+                    continue
+
+            # Prevent 제99조 (개명신고) from bleeding into unrelated questions
+            if statute in ["가족관계의 등록 등에 관한 법률", "법"] and "99" in art:
+                if clean_q and not any(k in clean_q for k in ["개명", "이름", "99조"]):
+                    continue
+
+            filtered_citations.append(cite)
+
+        # 2. Topic-aware Statute Guarantee (주제별 핵심 법령 최우선 보장)
+        topic_citations = []
+        if clean_q:
+            for rule in self.TOPIC_STATUTE_RULES:
+                # 부정어 체크
+                if "exclude_if" in rule and any(ex in clean_q for ex in rule["exclude_if"]):
+                    continue
+                # 필수 포함 단어 체크
+                if "required_all" in rule and not all(r in clean_q for r in rule["required_all"]):
+                    continue
+                if any(kw in clean_q for kw in rule["keywords"]):
+                    req_statute = rule["statute"]
+                    req_art = rule["article"]
+                    topic_citations.append({
+                        "type": "statute",
+                        "statute_name": req_statute,
+                        "article_no": req_art,
+                        "branch_no": None,
+                        "paragraph_no": None,
+                        "raw": f"{req_statute} {req_art}"
+                    })
+
+        # 핵심 조문을 최우선(Prepend)으로 배치하여 상위 슬롯 독점 보장
+        combined_citations = topic_citations + [
+            c for c in filtered_citations 
+            if not any(t["statute_name"] == c.get("statute_name") and t["article_no"] == c.get("article_no") for t in topic_citations)
+        ]
+
         verified_results = []
         seen_articles = set()
 
         # Execute concurrent verification
         tasks = []
-        for cite in citations:
+        for cite in combined_citations:
             if cite.get("type") == "statute":
                 law_name = cite["statute_name"]
                 art_no = cite["article_no"]
@@ -640,13 +818,15 @@ class RIGOrchestrator:
                 seen_articles.add(art_key)
                 tasks.append(self.cache.get_article(law_name, art_no, branch))
 
+
         if tasks:
             articles = await asyncio.gather(*tasks, return_exceptions=True)
             for art in articles:
                 if isinstance(art, dict) and art:
                     verified_results.append(art)
 
-        return verified_results
+        # Return top 4 most pertinent articles
+        return verified_results[:4]
 
     def format_verified_context(self, verified_laws: List[Dict[str, Any]]) -> str:
         """

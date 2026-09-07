@@ -621,11 +621,12 @@ class RAGService:
 
         sims = np.dot(self.embeddings, query_vec) / (norm_corpus.flatten() * norm_query)
 
-        # RLHF Gold Standard priority boost (1.35x)
+        # RLHF Gold Standard priority boost (only apply if semantically relevant to query)
         for i, doc in enumerate(self.corpus):
             meta = doc.get("metadata") or {}
             if meta.get("is_rlhf") or doc.get("category") == "RLHF모범정답":
-                sims[i] = float(sims[i]) * 1.35
+                if float(sims[i]) >= 0.70:
+                    sims[i] = min(float(sims[i]) * 1.15, 0.99)
 
         actual_k = min(top_k, len(self.corpus))
         top_indices = np.argsort(sims)[::-1][:actual_k]
@@ -636,7 +637,8 @@ class RAGService:
             doc_copy["dense_similarity"] = float(sims[idx])
             meta = doc_copy.get("metadata") or {}
             if meta.get("is_rlhf") or doc_copy.get("category") == "RLHF모범정답":
-                doc_copy["is_rlhf"] = True
+                if float(sims[idx]) >= 0.70:
+                    doc_copy["is_rlhf"] = True
             results.append(doc_copy)
         return results
 
@@ -672,10 +674,13 @@ class RAGService:
                         score = float(item["relevance_score"])
                         matched_doc = dict(candidates[idx])
                         meta = matched_doc.get("metadata") or {}
-                        # Boost RLHF Gold Standard items to the very top (+2.5 score)
+                        # Boost RLHF Gold Standard items ONLY if base reranker confirmed strong relevance
                         if meta.get("is_rlhf") or matched_doc.get("category") == "RLHF모범정답":
-                            score += 2.5
-                            matched_doc["is_rlhf"] = True
+                            if score >= 0.5:
+                                score += 0.5
+                                matched_doc["is_rlhf"] = True
+                            else:
+                                matched_doc["is_rlhf"] = False
 
                         matched_doc["rerank_score"] = float(score)
                         reranked_docs.append(matched_doc)

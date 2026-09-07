@@ -199,11 +199,11 @@ async def stream_chat_completion(
 
             # Gather target text for statutory citation discovery (user query + RAG titles/previews)
             target_snippets = [rag_search_query]
-            for d in retrieved_docs[:3]:
-                target_snippets.append(d.get("title", "") + " " + d.get("content", "")[:300])
+            for d in retrieved_docs[:4]:
+                target_snippets.append(d.get("title", "") + " " + d.get("content", "")[:1000])
             combined_target = "\n".join(target_snippets)
 
-            verified_laws = await rig_engine.verify_citations(combined_target)
+            verified_laws = await rig_engine.verify_citations(combined_target, user_query=rag_search_query)
 
             if verified_laws:
                 for law_item in verified_laws:
