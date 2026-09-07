@@ -186,24 +186,57 @@ async def stream_chat_completion(
         except Exception as e:
             print(f"[RAG] Retrieval error: {e}")
 
-    # 4.5 RIG: Retrieval-Interleaved Generation (국가법령정보센터 실시간 원문 대조 루프)
+    # 4.5 RIG: 3-Stage Draft-and-Verify Pipeline (초경량 스코핑 ➔ 실시간 조문 대조 ➔ 최종 합성)
+    verified_laws = []
+    scoped_info = None
     if use_rig and rag_search_query:
         try:
+            # Stage 1: 사법 쟁점 및 적용 법령 초경량 스코핑 (진행단계만 전송)
+            yield {
+                "type": "rig_step",
+                "data": {
+                    "step": "scoping",
+                    "message": "🔍 질문의 핵심 사법 쟁점 및 적용 법조문 분석 중..."
+                }
+            }
+
+            scoped_info = await rig_engine.scope_legal_issue_and_statutes(
+                rag_search_query, 
+                retrieved_docs=retrieved_docs[:3] if retrieved_docs else None
+            )
+
+            scoped_concept = scoped_info.get("concept", "가족관계등록 실무 검토")
+            scoped_statutes = scoped_info.get("statutes", [])
+
+            yield {
+                "type": "rig_step",
+                "data": {
+                    "step": "scoping_done",
+                    "concept": scoped_concept,
+                    "message": f"⚖️ 사법 쟁점 분석 완료: {scoped_concept}"
+                }
+            }
+
+            # Stage 2: RIG 국가법령정보센터 실시간 조문 대조
             yield {
                 "type": "rig_step",
                 "data": {
                     "step": "law_identify",
-                    "message": "🔍 관련 법령 조문 쟁점 분석 및 국가법령정보센터 실시간 대조 중..."
+                    "message": "🏛️ 국가법령정보센터 실시간 최신 현행 조문 대조 중..."
                 }
             }
 
-            # Gather target text for statutory citation discovery (user query + RAG titles/previews)
+            # Gather target text for statutory citation discovery (scoped statutes + RAG context)
             target_snippets = [rag_search_query]
-            for d in retrieved_docs[:4]:
-                target_snippets.append(d.get("title", "") + " " + d.get("content", "")[:1000])
+            for d in retrieved_docs[:3]:
+                target_snippets.append(d.get("title", "") + " " + d.get("content", "")[:500])
             combined_target = "\n".join(target_snippets)
 
-            verified_laws = await rig_engine.verify_citations(combined_target, user_query=rag_search_query)
+            verified_laws = await rig_engine.verify_citations(
+                combined_target, 
+                user_query=rag_search_query,
+                scoped_statutes=scoped_statutes
+            )
 
             if verified_laws:
                 for law_item in verified_laws:
@@ -224,6 +257,9 @@ async def stream_chat_completion(
                 verified_context = rig_engine.format_verified_context(verified_laws)
                 system_prompt += verified_context
 
+                # Add scoped concept guidance into system prompt
+                system_prompt += f"\n\n【사법 쟁점 포섭 가이드】\n본 사안의 핵심 사법 쟁점은 '{scoped_concept}'입니다. 위 검증된 실시간 법률 조문을 직결하여 명쾌한 결론을 도출하십시오.\n"
+
                 yield {
                     "type": "rig_step",
                     "data": {
@@ -231,8 +267,18 @@ async def stream_chat_completion(
                         "message": f"✅ 총 {len(verified_laws)}개 현행 법률 조문 원문 실시간 검증 완료 (공식 법령 기반 답변 작성)"
                     }
                 }
+
+            # Stage 3: 최종 스트리밍 작성 알림
+            yield {
+                "type": "rig_step",
+                "data": {
+                    "step": "generating",
+                    "message": "✍️ 검증된 현행 법령 원문 및 실무 지침 기반 최종 답변 작성 중..."
+                }
+            }
         except Exception as e:
-            print(f"[RIG] Interleaved verification error: {e}")
+            print(f"[RIG] 3-stage verification error: {e}")
+
 
 
     # 5. Build Final API Payload

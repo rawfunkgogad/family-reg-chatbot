@@ -729,14 +729,118 @@ class RIGOrchestrator:
         }
     ]
 
+    async def scope_legal_issue_and_statutes(
+        self, 
+        user_query: str, 
+        retrieved_docs: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        [Stage 1] 사법 쟁점 및 적용 법조문 초경량 스코핑 (Draft-and-Verify 1단계)
+        - 질문과 RAG 참고자료를 분석하여 핵심 사법 개념과 적용 조문을 0.5초 이내에 특정
+        - 초경량 JSON 응답으로 생성 지연 시간을 최소화하고, 실패 시 규칙 기반 안전망으로 즉시 대체
+        """
+        clean_q = (user_query or "").strip()
+        if not clean_q:
+            return {"concept": "가족관계등록 일반 상담", "statutes": []}
+
+        # 1. Fallback / Rule-based baseline first
+        baseline_statutes = []
+        baseline_concept = "가족관계등록 실무 심사 및 관련 법령 검토"
+        for rule in self.TOPIC_STATUTE_RULES:
+            if "exclude_if" in rule and any(ex in clean_q for ex in rule["exclude_if"]):
+                continue
+            if "required_all" in rule and not all(r in clean_q for r in rule["required_all"]):
+                continue
+            if any(kw in clean_q for kw in rule["keywords"]):
+                baseline_statutes.append({
+                    "statute": rule["statute"],
+                    "article": rule["article"],
+                    "topic": rule.get("topic", "")
+                })
+                if baseline_concept == "가족관계등록 실무 심사 및 관련 법령 검토":
+                    baseline_concept = rule.get("topic", baseline_concept)
+
+        # 2. Fast LLM Speculative Scoping (max_tokens: 120, temperature: 0.0, timeout: 2.5s)
+        api_base = os.environ.get("OPENAI_BASE_URL", "https://open.hasa.re.kr/v1")
+        api_key = os.environ.get("OPENAI_API_KEY", "sk-dev-Un5B6gafFJxVcRwGnw5AlT23wDGn1ooA")
+
+        doc_context = ""
+        if retrieved_docs:
+            titles = [d.get("title", "") for d in retrieved_docs[:3] if d.get("title")]
+            doc_context = ", ".join(titles)
+
+        scoping_prompt = (
+            "당신은 대한민국 법원 가족관계등록 사법 쟁점 분석관입니다.\n"
+            "민원인의 질문을 분석하여 적용할 법률명과 조문 번호, 핵심 쟁점 개념을 1줄로 특정하십시오.\n"
+            "반드시 순수한 JSON으로만 응답하십시오 (마크다운 백틱 없이).\n"
+            '형식: {"concept": "핵심 쟁점 1줄 요약", "statutes": [{"statute": "정식법률명", "article": "제O조"}]}'
+        )
+        user_prompt = f"질문: {clean_q}"
+        if doc_context:
+            user_prompt += f"\n참고자료: {doc_context}"
+
+        try:
+            async with httpx.AsyncClient(timeout=2.5) as client:
+                res = await client.post(
+                    f"{api_base}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.3-70b",
+                        "messages": [
+                            {"role": "system", "content": scoping_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 120
+                    }
+                )
+                if res.status_code == 200:
+                    raw_text = res.json()["choices"][0]["message"]["content"].strip()
+                    clean_json = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw_text, flags=re.MULTILINE).strip()
+                    parsed = json.loads(clean_json)
+                    concept = str(parsed.get("concept") or baseline_concept).strip()
+                    raw_statutes = parsed.get("statutes") or []
+
+                    validated_statutes = []
+                    for s in raw_statutes:
+                        if isinstance(s, dict):
+                            l_name = self.parser.resolve_canonical_law(s.get("statute", ""))
+                            a_no = str(s.get("article", "")).strip()
+                            if l_name and a_no:
+                                if not a_no.startswith("제"):
+                                    a_no = f"제{a_no}"
+                                if not a_no.endswith("조") and "조" not in a_no:
+                                    a_no = f"{a_no}조"
+                                validated_statutes.append({"statute": l_name, "article": a_no})
+
+                    # Merge with baseline to prevent omission of essential rules
+                    merged = list(validated_statutes)
+                    for b in baseline_statutes:
+                        if not any(m["statute"] == b["statute"] and m["article"] == b["article"] for m in merged):
+                            merged.append({"statute": b["statute"], "article": b["article"]})
+
+                    return {
+                        "concept": concept,
+                        "statutes": merged[:4]
+                    }
+        except Exception as e:
+            print(f"[RIG] Fast Scoping fallback to baseline: {e}")
+
+        return {
+            "concept": baseline_concept,
+            "statutes": [{"statute": b["statute"], "article": b["article"]} for b in baseline_statutes[:4]]
+        }
+
     async def verify_citations(
         self, 
         text: str, 
         initial_laws: Optional[List[Dict[str, Any]]] = None,
-        user_query: Optional[str] = None
+        user_query: Optional[str] = None,
+        scoped_statutes: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, Any]]:
         """
         텍스트 내 법령 인용 구문을 추출하고 국가법령정보센터 및 인메모리 캐시와 실시간 대조 검증
+        - scoped_statutes가 제공되면 1차 스코핑 결과를 최우선으로 검증 목록에 주입
         """
         citations = self.parser.extract_citations(text)
         if initial_laws:
@@ -773,7 +877,23 @@ class RIGOrchestrator:
 
             filtered_citations.append(cite)
 
-        # 2. Topic-aware Statute Guarantee (주제별 핵심 법령 최우선 보장)
+        # 2. Scoped Statutes (Stage 1 결과 최상위 배치)
+        scoped_citations = []
+        if scoped_statutes:
+            for s in scoped_statutes:
+                stat_name = s.get("statute") or s.get("statute_name")
+                art_no = s.get("article") or s.get("article_no")
+                if stat_name and art_no:
+                    scoped_citations.append({
+                        "type": "statute",
+                        "statute_name": stat_name,
+                        "article_no": art_no,
+                        "branch_no": None,
+                        "paragraph_no": None,
+                        "raw": f"{stat_name} {art_no}"
+                    })
+
+        # 3. Topic-aware Statute Guarantee (주제별 핵심 법령 최우선 보장)
         topic_citations = []
         if clean_q:
             for rule in self.TOPIC_STATUTE_RULES:
@@ -796,9 +916,14 @@ class RIGOrchestrator:
                     })
 
         # 핵심 조문을 최우선(Prepend)으로 배치하여 상위 슬롯 독점 보장
-        combined_citations = topic_citations + [
+        priority_citations = scoped_citations + [
+            t for t in topic_citations
+            if not any(s["statute_name"] == t["statute_name"] and s["article_no"] == t["article_no"] for s in scoped_citations)
+        ]
+
+        combined_citations = priority_citations + [
             c for c in filtered_citations 
-            if not any(t["statute_name"] == c.get("statute_name") and t["article_no"] == c.get("article_no") for t in topic_citations)
+            if not any(p["statute_name"] == c.get("statute_name") and p["article_no"] == c.get("article_no") for p in priority_citations)
         ]
 
         verified_results = []
@@ -818,7 +943,6 @@ class RIGOrchestrator:
                 seen_articles.add(art_key)
                 tasks.append(self.cache.get_article(law_name, art_no, branch))
 
-
         if tasks:
             articles = await asyncio.gather(*tasks, return_exceptions=True)
             for art in articles:
@@ -827,6 +951,7 @@ class RIGOrchestrator:
 
         # Return top 4 most pertinent articles
         return verified_results[:4]
+
 
     def format_verified_context(self, verified_laws: List[Dict[str, Any]]) -> str:
         """

@@ -518,7 +518,7 @@ async function sendMessage(text, options = {}) {
                 bodyDiv.insertBefore(rigContainer, contentDiv);
               }
 
-              renderRigAccordion(rigContainer, rigVerifiedLaws, isRigGrounded);
+              renderRigAccordion(rigContainer, rigVerifiedLaws, isRigGrounded, parsed.data);
               messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
             // 3. If cache status event received
@@ -779,14 +779,29 @@ function linkifyLawReferences(html) {
 }
 
 // Render RIG (Retrieval-Interleaved Generation) Statutory Grounding Accordion
-function renderRigAccordion(container, laws, isGrounded) {
+function renderRigAccordion(container, laws, isGrounded, latestStep) {
   if (!container) return;
 
   const count = laws.length;
   const isVerifying = !isGrounded;
-  const titleText = isGrounded
+  
+  let titleText = isGrounded
     ? "국가법령정보센터 실시간 검증 완료"
     : `국가법령정보센터 실시간 법령 대조 중... (${count}건)`;
+
+  if (!isGrounded && latestStep) {
+    if (latestStep.step === "scoping") {
+      titleText = "🔍 질문의 핵심 사법 쟁점 및 적용 법조문 분석 중...";
+    } else if (latestStep.step === "scoping_done") {
+      titleText = latestStep.message || "⚖️ 사법 쟁점 분석 완료";
+    } else if (latestStep.step === "law_identify") {
+      titleText = "🏛️ 국가법령정보센터 최신 현행 조문 실시간 대조 중...";
+    } else if (latestStep.step === "generating") {
+      titleText = "✍️ 검증 법령 기반 최종 실무 답변 작성 중...";
+    } else if (count > 0) {
+      titleText = `국가법령정보센터 실시간 법령 대조 중... (${count}개 조문)`;
+    }
+  }
 
   const cardsHtml = laws.map((item) => {
     const law = escapeHtml(item.law || "");
